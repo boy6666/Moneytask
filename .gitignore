@@ -1,0 +1,24 @@
+# ---- 设计文档：不纳入版本库（可本地保留，含需求边界与未决决策）----
+无感记账App-*.md
+记账App-*.md
+
+# ---- 研究/参考代码（RealtimeLedger / AutoAccounting 等，仅本地调研用）----
+_research/
+
+# ---- Gradle / 构建产物 ----
+.gradle/
+build/
+**/build/
+local.properties
+*.apk
+*.aab
+
+# ---- IDE ----
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# ---- 日志与临时 ----
+*.log
+/tmp/
