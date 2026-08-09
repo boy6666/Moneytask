@@ -1,0 +1,18 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 圆角底 + 账本样式图标（MVP 用矢量，避免二进制 PNG）。 -->
+    <path
+        android:fillColor="#1B5E20"
+        android:pathData="M24,12 h60 a12,12 0 0 1 12,12 v60 a12,12 0 0 1 -12,12 h-60 a12,12 0 0 1 -12,-12 v-60 a12,12 0 0 1 12,-12 z" />
+    <!-- 三行账目条 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M30,34 h48 v5 h-48 z M30,52 h34 v5 h-34 z M30,70 h42 v5 h-42 z" />
+    <!-- 币值符号 -->
+    <path
+        android:fillColor="#A5D6A7"
+        android:pathData="M72,62 a9,9 0 1 1 0,18 a9,9 0 1 1 0,-18 z" />
+</vector>

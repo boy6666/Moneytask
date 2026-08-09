@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">无感记账</string>
+    <string name="notification_listener_label">无感记账 · 通知采集</string>
+    <string name="listener_not_granted">未授予通知使用权</string>
+    <string name="listener_granted">通知监听已开启</string>
+    <string name="grant_access">授予通知使用权</string>
+    <string name="local_badge">纯本地 · 不联网</string>
+    <string name="recent_title">最近账目</string>
+    <string name="simulate_btn">模拟一条美团通知</string>
+    <string name="empty_state">暂无账目。授予通知使用权并做一笔消费，或点下方按钮模拟。</string>
+</resources>

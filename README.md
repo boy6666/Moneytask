@@ -39,34 +39,47 @@
 
 ## 项目结构
 
-目前仓库以 `ledger-core` 为核心：一个**纯 JVM / Kotlin** 模块，把产品最难、且开源项目（RealtimeLedger，MIT）没覆盖的差异点全部沉淀成可单测的逻辑。
+Gradle **多模块**仓库：最能打的「防重复 / 防误并」核心逻辑抽成纯 JVM 模块 `ledger-core`（无头可测），Android 应用壳 `app` 只负责平台接线。
 
 ```
-ledger-core/
-└── src/main/kotlin/com/moneytask/ledger/capture/
-    ├── CaptureEvent.kt       采集事件（含 sourceKey / 指纹 / 方向 / 渠道）
-    ├── CaptureGroup.kt       交易组状态机（OPEN / CLOSED / DISPUTED）与结论
-    ├── CorrelationEngine.kt  ★ 链路归并引擎（不去重防误并的核心）
-    ├── NotificationParser.kt 通知文本 → 结构化（金额多候选高/低权评分）
-    ├── ChannelClassifier.kt  渠道判定（银行 > 支付 > 商户，来源名优先）
-    ├── NotificationAdapter.kt 解析结果 → CaptureEvent（sourceKey + SHA-256 指纹）
-    ├── AutoCategorizer.kt    商户名 → 分类（Rule 优先级）
-    ├── LedgerWriter.kt       结论 → 账目（幂等落账 + 自动分类 + 待复核标记）
-    ├── LedgerStore.kt        持久化抽象（Android 层以 Room 实现）
-    ├── Account.kt / Category.kt / Transaction.kt / ParsedCapture.kt  领域模型
-    └── ...（配套 19 个单元/集成测试）
+Moneytask/
+├── settings.gradle.kts / build.gradle.kts   根构建脚本（插件版本、模块声明）
+├── gradlew / gradle/wrapper/                Gradle Wrapper
+├── ledger-core/      ★ 纯 JVM / Kotlin 核心（不引入 Android / Room）
+│   └── src/main/kotlin/com/moneytask/ledger/capture/
+│       ├── CaptureEvent.kt       采集事件（含 sourceKey / 指纹 / 方向 / 渠道）
+│       ├── CaptureGroup.kt       交易组状态机（OPEN / CLOSED / DISPUTED）与结论
+│       ├── CorrelationEngine.kt  ★ 链路归并引擎（防重复 / 防误并的核心）
+│       ├── NotificationParser.kt 通知文本 → 结构化（金额多候选高/低权评分）
+│       ├── ChannelClassifier.kt  渠道判定（银行 > 支付 > 商户，来源名优先）
+│       ├── NotificationAdapter.kt 解析结果 → CaptureEvent（sourceKey + SHA-256 指纹）
+│       ├── AutoCategorizer.kt    商户名 → 分类（Rule 优先级）
+│       ├── LedgerWriter.kt       结论 → 账目（幂等落账 + 自动分类 + 待复核标记）
+│       ├── LedgerStore.kt        持久化抽象（Android 层以 Room 实现）
+│       ├── Account.kt / Category.kt / Transaction.kt / ParsedCapture.kt  领域模型
+│       └── ...（配套 19 个单元/集成测试）
+└── app/               Android 应用壳（Compose + Room + 通知监听）
+    └── src/main/
+        ├── java/com/moneytask/ledger/
+        │   ├── CapturePipeline.kt       采集 → 归并 → 落账串接（含定时结算）
+        │   ├── AppContainer.kt          手动依赖注入（MVP 阶段暂不引 Hilt）
+        │   ├── MoneytaskApplication.kt  应用入口，装配容器
+        │   ├── db/                      Room 实体 / DAO / Database / Seeder
+        │   ├── service/                 NotificationListenerService（读取支付通知）
+        │   └── ui/                      MainActivity（Compose UI）
+        └── res/                         字符串、主题、矢量图标
 ```
 
-**说明**：`ledger-core` 刻意不引入 Android / Room 依赖，目标是**无头可测**。Android 应用壳、`NotificationListenerService`、Room 实体与 Migration 属下一步（见路线图）。
+**说明**：`ledger-core` 刻意不引入 Android / Room 依赖，目标是**无头可测**；Room 只落在 `app` 模块，通过 `LedgerStore` 接口隔离。核心三层去重（sourceKey 幂等 → SHA-256 指纹 → 跨渠道归并）全在 JVM 层，可单测。
 
 ---
 
 ## 构建 & 测试
 
 ```bash
-# 需要 JDK 17+（本机以 JDK 21 编译、JVM target 17）
-cd ledger-core
-JAVA_HOME=/path/to/jdk ./gradlew test
+# 需要 JDK 17+（本机以 JDK 21 编译、JVM target 17），SDK 路径见 local.properties（不必提交）
+./gradlew :ledger-core:test      # 核心 19 个单元/集成测试
+./gradlew :app:assembleDebug     # 编译应用壳 → app/build/outputs/apk/debug/app-debug.apk
 ```
 
 19 个测试全绿，覆盖真实通知样本的**端到端**验证：

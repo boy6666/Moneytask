@@ -1,0 +1,60 @@
+package com.moneytask.ledger.db
+
+import androidx.room.Entity
+import androidx.room.Index
+import androidx.room.PrimaryKey
+
+/** 账户（《MVP技术设计》3.1）。ID 用稳定字符串，便于与 ledger-core 领域模型映射。 */
+@Entity(tableName = "accounts", indices = [Index(value = ["bankTail"], unique = true)])
+data class AccountEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val type: String,
+    val bankTail: String?,
+    val isSystemDefault: Boolean,
+    val createdAt: Long,
+    val updatedAt: Long,
+)
+
+/** 分类（《MVP技术设计》3.2）。 */
+@Entity(tableName = "categories")
+data class CategoryEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val type: String,
+    val icon: String = "",
+    val isSystemDefault: Boolean = true,
+    val createdAt: Long,
+    val updatedAt: Long,
+)
+
+/**
+ * 账目（《MVP技术设计》3.3）。与 ledger-core 的 [com.moneytask.ledger.capture.Transaction] 对应。
+ * groupId 唯一索引兜底「同一交易组只落一笔」（绝不重复记账的持久层保险）。
+ */
+@Entity(
+    tableName = "transactions",
+    indices = [
+        Index("groupId"),
+        Index("time"),
+        Index("accountId"),
+        Index("categoryId"),
+    ],
+)
+data class TransactionEntity(
+    @PrimaryKey val id: String,
+    val amountFen: Long,
+    val type: String,
+    val time: Long,
+    val accountId: String?,
+    val categoryId: String?,
+    val merchant: String?,
+    val paymentMethod: String?,
+    val note: String?,
+    val groupId: String?,
+    val source: String,
+    val isPendingReview: Boolean,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val deletedAt: Long? = null,
+)

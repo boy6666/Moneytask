@@ -1,0 +1,4 @@
+<resources>
+    <!-- Compose 全权接管 UI；XML 主题只需提供无 ActionBar 的基座。 -->
+    <style name="Theme.Moneytask" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>
