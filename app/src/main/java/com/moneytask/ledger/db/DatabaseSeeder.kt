@@ -12,13 +12,14 @@ object DatabaseSeeder {
 
     private suspend fun seedCategories(dao: LedgerDao, now: Long) {
         if (dao.categoryCount() > 0) return
-        dao.insertCategories(DefaultCategories.all.map { c ->
+        dao.insertCategories(DefaultCategories.all.mapIndexed { i, c ->
             CategoryEntity(
                 id = c.id,
                 name = c.name,
                 type = c.type.name,
                 icon = c.icon,
                 isSystemDefault = c.isSystemDefault,
+                sortOrder = i,
                 createdAt = now,
                 updatedAt = now,
             )

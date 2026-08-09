@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -13,6 +14,14 @@ interface LedgerDao {
     /** 落账。groupId 唯一索引（DB 层）兜底：同一交易组重复插入会冲突，由上层先查后写。 */
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(tx: TransactionEntity)
+
+    /** 复核/手动改账后整行更新。 */
+    @Update
+    suspend fun update(tx: TransactionEntity)
+
+    /** 软删除：置 deletedAt（UI 删除、复核移除），不再被各类查询命中。 */
+    @Query("UPDATE transactions SET deletedAt = :now WHERE id = :id AND deletedAt IS NULL")
+    suspend fun softDeleteById(id: String, now: Long): Int
 
     @Query("SELECT * FROM transactions WHERE id = :id AND deletedAt IS NULL")
     suspend fun findById(id: String): TransactionEntity?
@@ -28,6 +37,10 @@ interface LedgerDao {
 
     @Query("SELECT * FROM transactions WHERE deletedAt IS NULL ORDER BY time DESC LIMIT :limit")
     fun observeRecent(limit: Int = 500): Flow<List<TransactionEntity>>
+
+    /** 待复核账目（自动落账但方向/账户信息不足）。 */
+    @Query("SELECT * FROM transactions WHERE isPendingReview = 1 AND deletedAt IS NULL ORDER BY time DESC")
+    fun observePendingReview(): Flow<List<TransactionEntity>>
 
     // ---- 账户 / 分类（供 DatabaseSeeder 与归因引擎读取） ----
 
@@ -45,4 +58,7 @@ interface LedgerDao {
 
     @Query("SELECT COUNT(*) FROM categories")
     suspend fun categoryCount(): Int
+
+    @Query("SELECT * FROM categories WHERE type = :type ORDER BY sortOrder, name")
+    suspend fun categories(type: String): List<CategoryEntity>
 }

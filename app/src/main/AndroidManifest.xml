@@ -7,6 +7,10 @@
         android:name="android.permission.INTERNET"
         tools:node="remove" />
 
+    <!-- 常驻/省电前台服务（采集保活）。specialUse 非标准类，Android 14 要求 subtype 属性。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
     <application
         android:name=".MoneytaskApplication"
         android:allowBackup="true"
@@ -33,6 +37,16 @@
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
+        </service>
+
+        <!-- 常驻/省电前台服务：把采集管线保活到前台进程。 -->
+        <service
+            android:name=".service.CaptureForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="seamless_accounting_capture" />
         </service>
     </application>
 </manifest>

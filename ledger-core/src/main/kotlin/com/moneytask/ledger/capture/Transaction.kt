@@ -25,6 +25,7 @@ data class Transaction(
     val groupId: String?,
     val source: TxnSource,
     val isPendingReview: Boolean = false,
+    val manuallyEdited: Boolean = false,
     val createdAt: Long,
     val updatedAt: Long,
 )

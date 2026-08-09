@@ -8,9 +8,8 @@ import androidx.room.RoomDatabase
 /**
  * 本地账本文库（《MVP技术设计》3）。
  *
- * MVP schema 直接定为 version 1（含 accounts / categories / transactions）。
- * 后续若需演进（如新增 raw_captures / capture_groups 表做全链路审计），通过 Room Migration 升级——
- * 设计文档中的 Migration(1→2) 即针对该演进路径预留。
+ * schema 演进通过 [MIGRATION_1_2] 完成（现为 version 2）。exportSchema 开启并把 schema 输出到
+ * app/schemas，供 MigrationTestHelper 做升级回归测试。
  */
 @Database(
     entities = [
@@ -18,8 +17,8 @@ import androidx.room.RoomDatabase
         CategoryEntity::class,
         TransactionEntity::class,
     ],
-    version = 1,
-    exportSchema = false,
+    version = 2,
+    exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun ledgerDao(): LedgerDao
@@ -33,7 +32,10 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "moneytask.db",
-                ).build().also { instance = it }
+                )
+                    .addMigrations(MIGRATION_1_2)
+                    .build()
+                    .also { instance = it }
             }
     }
 }

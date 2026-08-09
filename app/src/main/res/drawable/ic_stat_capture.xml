@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 前台服务小图标：单色账本（状态栏规范要求纯 alpha 剪影）。 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M6,4 h12 a2,2 0 0 1 2,2 v12 a2,2 0 0 1 -2,2 h-12 a2,2 0 0 1 -2,-2 v-12 a2,2 0 0 1 2,-2 z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M8,8 h8 v1.5 h-8 z M8,11.5 h6 v1.5 h-6 z M8,15 h7 v1.5 h-7 z" />
+</vector>

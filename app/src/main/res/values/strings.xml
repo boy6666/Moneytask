@@ -8,4 +8,21 @@
     <string name="recent_title">最近账目</string>
     <string name="simulate_btn">模拟一条美团通知</string>
     <string name="empty_state">暂无账目。授予通知使用权并做一笔消费，或点下方按钮模拟。</string>
+    <string name="service_title">无感记账 · 采集保活</string>
+    <string name="service_text">监听消费通知，自动记账。仅在本地处理，不联网。</string>
+    <string name="service_channel">采集保活</string>
+
+    <string name="add_entry">记一笔</string>
+    <string name="pending_review">待复核</string>
+    <string name="view_recent">最近账目</string>
+    <string name="pending_empty">没有待复核的账目。</string>
+    <string name="confirm">确认</string>
+    <string name="delete">删除</string>
+    <string name="save">保存</string>
+    <string name="cancel">取消</string>
+    <string name="amount_label">金额（元）</string>
+    <string name="merchant_label">商户 / 摘要</string>
+    <string name="account_label">账户</string>
+    <string name="category_label">分类</string>
+    <string name="invalid_amount">请输入有效金额（元）</string>
 </resources>

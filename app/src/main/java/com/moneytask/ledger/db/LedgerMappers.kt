@@ -22,6 +22,7 @@ object LedgerMappers {
         groupId = groupId,
         source = source.name,
         isPendingReview = isPendingReview,
+        manuallyEdited = manuallyEdited,
         createdAt = createdAt,
         updatedAt = updatedAt,
     )
@@ -39,6 +40,7 @@ object LedgerMappers {
         groupId = groupId,
         source = if (source == "MANUAL") TxnSource.MANUAL else TxnSource.AUTO,
         isPendingReview = isPendingReview,
+        manuallyEdited = manuallyEdited,
         createdAt = createdAt,
         updatedAt = updatedAt,
     )

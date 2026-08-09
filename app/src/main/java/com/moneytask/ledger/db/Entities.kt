@@ -16,7 +16,7 @@ data class AccountEntity(
     val updatedAt: Long,
 )
 
-/** 分类（《MVP技术设计》3.2）。 */
+/** 分类（《MVP技术设计》3.2）。sortOrder 为 v2 迁移新增（分类排序）。 */
 @Entity(tableName = "categories")
 data class CategoryEntity(
     @PrimaryKey val id: String,
@@ -24,6 +24,7 @@ data class CategoryEntity(
     val type: String,
     val icon: String = "",
     val isSystemDefault: Boolean = true,
+    val sortOrder: Int = 0,
     val createdAt: Long,
     val updatedAt: Long,
 )
@@ -54,6 +55,8 @@ data class TransactionEntity(
     val groupId: String?,
     val source: String,
     val isPendingReview: Boolean,
+    /** v2 迁移新增：是否被人工修改/复核过（手动补录或复核落库后为 true）。 */
+    val manuallyEdited: Boolean = false,
     val createdAt: Long,
     val updatedAt: Long,
     val deletedAt: Long? = null,

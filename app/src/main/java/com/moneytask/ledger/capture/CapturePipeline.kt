@@ -52,6 +52,8 @@ class CapturePipeline(
      * @return true 表示被解析为有效交易并进入管线。
      */
     fun onNotification(raw: RawNotification): Boolean {
+        // 来源白名单：只处理可信支付/银行/商户渠道，其余通知直接丢弃（省电 + 防误采）。
+        if (!SupportedSources.isSupported(raw.sourcePackage)) return false
         val parsed = parser.parse(raw)
         if (!parsed.matched || parsed.amountFen == null) return false
         val accepted = engine.onEvent(NotificationAdapter.toCaptureEvent(raw, parsed))
