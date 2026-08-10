@@ -61,3 +61,6 @@ data class TransactionEntity(
     val updatedAt: Long,
     val deletedAt: Long? = null,
 )
+
+/** 聚合查询结果行：key 为分类/账户/方向 id，total 为金额（分）。 */
+data class SumRow(val key: String, val total: Long)

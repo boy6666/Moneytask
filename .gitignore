@@ -22,3 +22,6 @@ local.properties
 # ---- 日志与临时 ----
 *.log
 /tmp/
+
+# ---- 发布签名密钥（必备份，绝不入库）----
+app/keystore/

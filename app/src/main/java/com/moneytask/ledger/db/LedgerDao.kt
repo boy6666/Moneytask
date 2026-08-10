@@ -59,6 +59,56 @@ interface LedgerDao {
     @Query("SELECT COUNT(*) FROM categories")
     suspend fun categoryCount(): Int
 
+    @Query("SELECT * FROM categories ORDER BY sortOrder, name")
+    suspend fun categoriesAll(): List<CategoryEntity>
+
     @Query("SELECT * FROM categories WHERE type = :type ORDER BY sortOrder, name")
     suspend fun categories(type: String): List<CategoryEntity>
+
+    // ---- 备份 / 恢复 ----
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(txs: List<TransactionEntity>)
+
+    @Query("DELETE FROM transactions")
+    suspend fun deleteAllTransactions()
+
+    @Query("DELETE FROM accounts")
+    suspend fun deleteAllAccounts()
+
+    @Query("DELETE FROM categories")
+    suspend fun deleteAllCategories()
+
+    // ---- 账户管理 ----
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAccount(a: AccountEntity)
+
+    @Query("DELETE FROM accounts WHERE id = :id")
+    suspend fun deleteAccountById(id: String)
+
+    @Query("UPDATE accounts SET isSystemDefault = 0")
+    suspend fun clearAccountDefaults()
+
+    @Query("UPDATE accounts SET isSystemDefault = 1 WHERE id = :id")
+    suspend fun setAccountDefault(id: String)
+
+    // ---- 统计聚合 ----
+
+    /** 区间内按方向汇总（支出/收入）。 */
+    @Query("SELECT COALESCE(type,'') AS `key`, SUM(amountFen) AS total FROM transactions " +
+        "WHERE deletedAt IS NULL AND time BETWEEN :start AND :end GROUP BY type")
+    suspend fun sumByType(start: Long, end: Long): List<SumRow>
+
+    /** 区间内支出按分类汇总（用于分类占比）。 */
+    @Query("SELECT COALESCE(categoryId,'') AS `key`, SUM(amountFen) AS total FROM transactions " +
+        "WHERE deletedAt IS NULL AND type='EXPENSE' AND time BETWEEN :start AND :end " +
+        "GROUP BY categoryId ORDER BY total DESC")
+    suspend fun expenseByCategory(start: Long, end: Long): List<SumRow>
+
+    /** 区间内按账户汇总。 */
+    @Query("SELECT COALESCE(accountId,'') AS `key`, SUM(amountFen) AS total FROM transactions " +
+        "WHERE deletedAt IS NULL AND time BETWEEN :start AND :end " +
+        "GROUP BY accountId ORDER BY total DESC")
+    suspend fun sumByAccount(start: Long, end: Long): List<SumRow>
 }

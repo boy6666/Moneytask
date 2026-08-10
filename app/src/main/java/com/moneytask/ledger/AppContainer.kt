@@ -1,6 +1,7 @@
 package com.moneytask.ledger
 
 import android.content.Context
+import android.net.Uri
 import com.moneytask.ledger.capture.Account
 import com.moneytask.ledger.capture.CapturePipeline
 import com.moneytask.ledger.capture.Category
@@ -12,25 +13,31 @@ import com.moneytask.ledger.capture.RawNotification
 import com.moneytask.ledger.capture.Transaction
 import com.moneytask.ledger.capture.TxnSource
 import com.moneytask.ledger.capture.TxnType
+import com.moneytask.ledger.db.AccountEntity
 import com.moneytask.ledger.db.AppDatabase
+import com.moneytask.ledger.db.BackupManager
 import com.moneytask.ledger.db.DatabaseSeeder
 import com.moneytask.ledger.db.LedgerDao
 import com.moneytask.ledger.db.LedgerMappers.toDomain
 import com.moneytask.ledger.db.LedgerMappers.toEntity
 import com.moneytask.ledger.db.RoomLedgerStore
+import com.moneytask.ledger.db.SumRow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import java.io.File
+import java.time.Instant
+import java.time.ZoneId
 import java.util.UUID
 
 /**
  * 手动 DI 容器：装配数据库、预置数据、归因引擎、落账器与采集管线。
  * MVP 阶段不引入 Hilt，保持依赖尽量少；后续可平滑替换为 Hilt 模块。
  */
-class AppContainer(context: Context) {
+class AppContainer(private val context: Context) {
     private val io = Dispatchers.IO
     private val appScope = CoroutineScope(SupervisorJob() + io)
 
@@ -118,6 +125,69 @@ class AppContainer(context: Context) {
     /** 删除一笔账目（软删，便于误操作恢复/导出前离线审计）。 */
     fun deleteTransaction(id: String) = runBlocking(io) {
         dao.softDeleteById(id, System.currentTimeMillis())
+    }
+
+    // ---- 备份 / 恢复 ----
+
+    /** 全量导出为 JSON 文件（应用私有 external files，可用 FileProvider 分享）。 */
+    fun exportBackup(): File = BackupManager.export(context, dao)
+
+    /** 导出文件对应的可分享 Uri。 */
+    fun backupShareUri(file: File): Uri = BackupManager.shareUri(context, file)
+
+    /** 从系统文件选择器选中 Uri 整库恢复，返回恢复的账目条数。 */
+    fun importBackup(uri: Uri): Int = BackupManager.import(context, dao, uri)
+
+    // ---- 统计 ----
+
+    /** 当前自然月的 [起始时间, 结束时间) 毫秒区间。 */
+    fun monthRange(now: Long = System.currentTimeMillis()): Pair<Long, Long> {
+        val ld = Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()).toLocalDate()
+        val start = ld.withDayOfMonth(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val end = ld.plusMonths(1).withDayOfMonth(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        return start to end
+    }
+
+    fun sumByType(start: Long, end: Long): List<SumRow> = runBlocking(io) { dao.sumByType(start, end) }
+
+    fun expenseByCategory(start: Long, end: Long): List<SumRow> = runBlocking(io) { dao.expenseByCategory(start, end) }
+
+    fun sumByAccount(start: Long, end: Long): List<SumRow> = runBlocking(io) { dao.sumByAccount(start, end) }
+
+    /** 分类 id → (图标, 名称)，供报表把聚合 key 还原成可读名称。 */
+    fun categoriesById(): Map<String, Pair<String, String>> = runBlocking(io) {
+        dao.categoriesAll().associate { it.id to (it.icon to it.name) }
+    }
+
+    /** 账户 id → 名称，供报表还原账户聚合。 */
+    fun accountsById(): Map<String, String> = runBlocking(io) {
+        dao.accounts().associate { it.id to it.name }
+    }
+
+    /** 当前有效账目条数（含自动与手动）。 */
+    fun transactionCount(): Int = runBlocking(io) { dao.count() }
+
+    // ---- 账户管理 ----
+
+    /** 账户池（含 bankTail/isSystemDefault，供管理页展示）。 */
+    val accountsDb: List<AccountEntity> get() = runBlocking(io) { dao.accounts() }
+
+    /** 新增账户（type 取 CASH/BANK/WECHAT/ALIPAY/OTHER）。 */
+    fun addAccount(name: String, type: String): Boolean = runBlocking(io) {
+        if (name.isBlank()) return@runBlocking false
+        val now = System.currentTimeMillis()
+        dao.insertAccount(
+            AccountEntity("acc_c_${UUID.randomUUID().toString().take(8)}", name.trim(), type, null, false, now, now)
+        )
+        true
+    }
+
+    fun deleteAccount(id: String) = runBlocking(io) { dao.deleteAccountById(id) }
+
+    /** 设某账户为默认（先清空全部默认标记，再置该账户）。 */
+    fun setDefaultAccount(id: String) = runBlocking(io) {
+        dao.clearAccountDefaults()
+        dao.setAccountDefault(id)
     }
 
     /** 演示：喂一条真实美团链上的合成通知，用于在无真实通知时验证全链路。 */

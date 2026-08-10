@@ -14,13 +14,25 @@ android {
         minSdk = 26
         targetSdk = 34
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "1.0.0"
+    }
+
+    signingConfigs {
+        // 发布签名（密钥详见 app/keystore/README.txt，务必自行备份；keystore 不入库）。
+        create("release") {
+            storeFile = file("keystore/moneytask-release.jks")
+            storePassword = "Moneytask@2026Rel"
+            keyAlias = "moneytask"
+            keyPassword = "Moneytask@2026Rel"
+        }
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true        // R8 精简代码
+            isShrinkResources = true      // 精简资源
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
