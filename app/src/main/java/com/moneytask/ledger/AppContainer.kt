@@ -21,6 +21,7 @@ import com.moneytask.ledger.db.LedgerDao
 import com.moneytask.ledger.db.LedgerMappers.toDomain
 import com.moneytask.ledger.db.LedgerMappers.toEntity
 import com.moneytask.ledger.db.RoomLedgerStore
+import com.moneytask.ledger.db.DayStat
 import com.moneytask.ledger.db.SumRow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -153,6 +154,37 @@ class AppContainer(private val context: Context) {
     fun expenseByCategory(start: Long, end: Long): List<SumRow> = runBlocking(io) { dao.expenseByCategory(start, end) }
 
     fun sumByAccount(start: Long, end: Long): List<SumRow> = runBlocking(io) { dao.sumByAccount(start, end) }
+
+    /** 按天汇总收支（供趋势图）。 */
+    fun dailySum(start: Long, end: Long): List<DayStat> = runBlocking(io) { dao.dailySum(start, end) }
+
+    /**
+     * 近 N 个自然日的 [起始, 次日0点) 毫秒区间（含今天）。
+     * 例如 lastDaysRange(7) 返回 [6 天前 0 点, 今天 24 点)。
+     */
+    fun lastDaysRange(days: Int, now: Long = System.currentTimeMillis()): Pair<Long, Long> {
+        val today = Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()).toLocalDate()
+        val start = today.minusDays((days - 1).toLong()).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val end = today.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        return start to end
+    }
+
+    /**
+     * 把近 N 天的按天汇总补成连续天数序列（无账日的补 0），供柱状图/折线图按序绘制。
+     * @return 每个元素的 day 为该日 "MM/dd" 标签。
+     */
+    fun dailySeries(days: Int, now: Long = System.currentTimeMillis()): List<Triple<String, Long, Long>> {
+        val today = Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()).toLocalDate()
+        val (start, end) = lastDaysRange(days, now)
+        val map = dailySum(start, end).associate { it.day to it }
+        return (0 until days).map { offset ->
+            val d = today.minusDays((days - 1 - offset).toLong())
+            val key = d.toString()
+            val stat = map[key]
+            Triple(d.format(java.time.format.DateTimeFormatter.ofPattern("MM/dd")),
+                stat?.expenseFen ?: 0L, stat?.incomeFen ?: 0L)
+        }
+    }
 
     /** 分类 id → (图标, 名称)，供报表把聚合 key 还原成可读名称。 */
     fun categoriesById(): Map<String, Pair<String, String>> = runBlocking(io) {

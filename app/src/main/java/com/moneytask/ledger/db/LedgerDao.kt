@@ -95,20 +95,28 @@ interface LedgerDao {
 
     // ---- 统计聚合 ----
 
-    /** 区间内按方向汇总（支出/收入）。 */
+    /** 区间内按方向汇总（支出/收入）。:isPending 排除待复核，仅计已确认账目。 */
     @Query("SELECT COALESCE(type,'') AS `key`, SUM(amountFen) AS total FROM transactions " +
-        "WHERE deletedAt IS NULL AND time BETWEEN :start AND :end GROUP BY type")
+        "WHERE deletedAt IS NULL AND isPendingReview = 0 AND time BETWEEN :start AND :end GROUP BY type")
     suspend fun sumByType(start: Long, end: Long): List<SumRow>
 
     /** 区间内支出按分类汇总（用于分类占比）。 */
     @Query("SELECT COALESCE(categoryId,'') AS `key`, SUM(amountFen) AS total FROM transactions " +
-        "WHERE deletedAt IS NULL AND type='EXPENSE' AND time BETWEEN :start AND :end " +
+        "WHERE deletedAt IS NULL AND isPendingReview = 0 AND type='EXPENSE' AND time BETWEEN :start AND :end " +
         "GROUP BY categoryId ORDER BY total DESC")
     suspend fun expenseByCategory(start: Long, end: Long): List<SumRow>
 
     /** 区间内按账户汇总。 */
     @Query("SELECT COALESCE(accountId,'') AS `key`, SUM(amountFen) AS total FROM transactions " +
-        "WHERE deletedAt IS NULL AND time BETWEEN :start AND :end " +
+        "WHERE deletedAt IS NULL AND isPendingReview = 0 AND time BETWEEN :start AND :end " +
         "GROUP BY accountId ORDER BY total DESC")
     suspend fun sumByAccount(start: Long, end: Long): List<SumRow>
+
+    /** 区间内按天汇总收支。用 SQLite date() 按本地时区切天（不含毫秒），供趋势图使用。 */
+    @Query("SELECT date(time/1000, 'unixepoch', 'localtime') AS day, " +
+        "SUM(CASE WHEN type='EXPENSE' THEN amountFen ELSE 0 END) AS expenseFen, " +
+        "SUM(CASE WHEN type='INCOME' THEN amountFen ELSE 0 END) AS incomeFen " +
+        "FROM transactions WHERE deletedAt IS NULL AND isPendingReview = 0 AND time BETWEEN :start AND :end " +
+        "GROUP BY day ORDER BY day ASC")
+    suspend fun dailySum(start: Long, end: Long): List<DayStat>
 }

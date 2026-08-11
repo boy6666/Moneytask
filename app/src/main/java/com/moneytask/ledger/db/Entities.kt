@@ -64,3 +64,6 @@ data class TransactionEntity(
 
 /** 聚合查询结果行：key 为分类/账户/方向 id，total 为金额（分）。 */
 data class SumRow(val key: String, val total: Long)
+
+/** 按天分组汇总：day 为 "YYYY-MM-DD"（受时区影响），expenseFen/incomeFen 单位分。 */
+data class DayStat(val day: String, val expenseFen: Long, val incomeFen: Long)

@@ -56,6 +56,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.moneytask.ledger.AppContainer
+import com.moneytask.ledger.db.AccountEntity
 import kotlinx.coroutines.launch
 
 /** 账户类型可选项（写库用 type 常量）。 */
@@ -80,6 +81,7 @@ internal fun MeScreen(c: AppContainer, onReplayOnboarding: () -> Unit) {
 
     var showAddAccount by remember { mutableStateOf(false) }
     var importUri by remember { mutableStateOf<Uri?>(null) }
+    var deletingAccount by remember { mutableStateOf<AccountEntity?>(null) }
 
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -96,7 +98,7 @@ internal fun MeScreen(c: AppContainer, onReplayOnboarding: () -> Unit) {
             accounts.forEach { acc ->
                 item { AccountCard(acc.name, acc.type, acc.isSystemDefault,
                     onSetDefault = { c.setDefaultAccount(acc.id); refresh++ },
-                    onDelete = { c.deleteAccount(acc.id); refresh++ }) }
+                    onDelete = { deletingAccount = acc }) }
             }
 
             item {
@@ -169,6 +171,25 @@ internal fun MeScreen(c: AppContainer, onReplayOnboarding: () -> Unit) {
             refresh++
             showAddAccount = false
         })
+    }
+    // 删除账户不可逆且其历史流水仍留在报表中（会显示为原始 ID），先确认再删。
+    deletingAccount?.let { acc ->
+        AlertDialog(
+            onDismissRequest = { deletingAccount = null },
+            title = { Text("删除账户「${acc.name}」？") },
+            text = { Text("账户将被删除。该账户已有的流水不会被删除，只是报表中不再显示账户名。${if (acc.isSystemDefault) "\n\n此账户为系统默认账户，请谨慎操作。" else ""}") },
+            confirmButton = {
+                TextButton(onClick = {
+                    c.deleteAccount(acc.id)
+                    deletingAccount = null
+                    scope.launch { snackbar.showSnackbar("已删除账户「${acc.name}」") }
+                    refresh++
+                }) { Text("删除", color = MoneyRed) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deletingAccount = null }) { Text("取消") }
+            },
+        )
     }
     importUri?.let { uri ->
         ImportConfirmDialog(c, uri,

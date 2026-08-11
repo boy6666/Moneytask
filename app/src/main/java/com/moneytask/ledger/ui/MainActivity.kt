@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -61,6 +62,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -71,11 +73,14 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.moneytask.ledger.AppContainer
 import com.moneytask.ledger.MoneytaskApplication
@@ -163,13 +168,25 @@ class MainActivity : ComponentActivity() {
         var listenerGranted by remember { mutableStateOf(isListenerEnabled()) }
         var showPending by remember { mutableStateOf(false) }
         var showAdd by remember { mutableStateOf(false) }
+        var pendingDelete by remember { mutableStateOf<Transaction?>(null) }
         val onResumeGranted = remember {
             {
                 listenerGranted = isListenerEnabled()
                 if (listenerGranted) CaptureForegroundService.start(this@MainActivity)
             }
         }
-        androidx.compose.runtime.LaunchedEffect(Unit) { onResumeGranted() }
+        // 用生命周期观察器在每次 RESUME 都重查通知监听授权并拉起前台服务。
+        // 修 bug：旧的 LaunchedEffect(Unit) 只在首次装配执行一次、无 onResume 钩子，
+        // 用户从系统设置授权返回后 listenerGranted 仍是旧值 → 提示卡残留且服务不启动。
+        val lifecycleOwner = LocalLifecycleOwner.current
+        DisposableEffect(lifecycleOwner, onResumeGranted) {
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) onResumeGranted()
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onResumeGranted() // ON_RESUME 首次也会触发，等价替换原 LaunchedEffect(Unit)
+            onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        }
 
         // 分类图标映射（给交易行配一个彩色圆底 emoji 头像）。
         val iconOf = remember {
@@ -200,7 +217,9 @@ class MainActivity : ComponentActivity() {
                     if (pending.isEmpty()) {
                         item { EmptyState(emoji = "🎊", title = stringResource(R.string.pending_empty), sub = "没有等待确认的账目") }
                     } else {
-                        items(pending, key = { it.id }) { t -> PendingRow(t) }
+                        items(pending, key = { it.id }) { t ->
+                            PendingRow(t, onRequestDelete = { pendingDelete = it })
+                        }
                     }
                 } else {
                     item { SectionTitle(stringResource(R.string.recent_title)) }
@@ -212,14 +231,39 @@ class MainActivity : ComponentActivity() {
                 }
 
                 item { Spacer(Modifier.height(4.dp)) }
-                item { ListenerCard(listenerGranted, onOpenSettings = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }) }
-                item { SimulateCard { c.simulateMeituanPurchase() } }
+                // 已授予通知使用权后不再显示该提示卡；仅未授权时提示去开启。
+                if (!listenerGranted) {
+                    item { ListenerCard(onOpenSettings = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }) }
+                }
+                item { SimulateCard {
+                    c.simulateMeituanPurchase()
+                    // 归并无感、入账需等结算窗口，点击即给即时确认，避免用户以为没生效。
+                    Toast.makeText(this@MainActivity, "已模拟，稍后自动入账", Toast.LENGTH_SHORT).show()
+                } }
                 item { Spacer(Modifier.height(4.dp)) }
             }
         }
 
         if (showAdd) {
             ManualEntryDialog(container = c, onDismiss = { showAdd = false })
+        }
+
+        // 删除待复核为破坏性操作且无撤销，先确认再执行。
+        pendingDelete?.let { del ->
+            AlertDialog(
+                onDismissRequest = { pendingDelete = null },
+                title = { Text("删除这笔待复核账目？") },
+                text = { Text("将删除\"${del.merchant ?: "未识别商户"}\" ¥${formatYuan(del.amountFen)}，删除后不可恢复。") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        onDeleteClick(del.id)
+                        pendingDelete = null
+                    }) { Text("删除", color = MoneyRed) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingDelete = null }) { Text(stringResource(R.string.cancel)) }
+                },
+            )
         }
     }
 
@@ -378,7 +422,7 @@ class MainActivity : ComponentActivity() {
 
     /** 待复核卡：黄色警示底，明显 确认/删除。 */
     @Composable
-    private fun PendingRow(t: Transaction) {
+    private fun PendingRow(t: Transaction, onRequestDelete: (Transaction) -> Unit) {
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
@@ -412,7 +456,7 @@ class MainActivity : ComponentActivity() {
                         Spacer(Modifier.width(4.dp))
                         Text(stringResource(R.string.confirm))
                     }
-                    OutlinedButton(onClick = { onDeleteClick(t.id) },
+                    OutlinedButton(onClick = { onRequestDelete(t) },
                         shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = MoneyRed)) {
                         Icon(Icons.Filled.Delete, null, modifier = Modifier.size(18.dp))
@@ -431,10 +475,12 @@ class MainActivity : ComponentActivity() {
 
     private fun onConfirmClick(id: String) {
         container().confirmReview(id)
+        Toast.makeText(this@MainActivity, "已确认 ✓", Toast.LENGTH_SHORT).show()
     }
 
     private fun onDeleteClick(id: String) {
         container().deleteTransaction(id)
+        Toast.makeText(this@MainActivity, "已删除", Toast.LENGTH_SHORT).show()
     }
 
     /** 精致空状态。 */
@@ -453,53 +499,33 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** 通知权限卡片。 */
+    /** 通知权限提示卡：仅在未授予通知使用权时渲染（已授权后主页不再出现）。 */
     @Composable
-    private fun ListenerCard(granted: Boolean, onOpenSettings: () -> Unit) {
-        if (granted) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9)),
-            ) {
-                Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Check, null, tint = MoneyGreen, modifier = Modifier.size(20.dp))
+    private fun ListenerCard(onOpenSettings: () -> Unit) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFF3F9FF)),
+        ) {
+            Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(34.dp).background(Color(0xFFE1F0FF), CircleShape),
+                        contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.Notifications, null, tint = BrandDeep, modifier = Modifier.size(18.dp))
+                    }
                     Spacer(Modifier.width(10.dp))
                     Column {
-                        Text("通知监听已开启", style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold, color = MoneyGreen)
-                        Text("正在实时捕获支付通知，前台服务保活中",
+                        Text("开启自动记账", fontWeight = FontWeight.SemiBold)
+                        Text("需要通知使用权，微信/支付宝付款后自动入账",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-            }
-        } else {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFF3F9FF)),
-            ) {
-                Column(Modifier.fillMaxWidth().padding(14.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(34.dp).background(Color(0xFFE1F0FF), CircleShape),
-                            contentAlignment = Alignment.Center) {
-                            Icon(Icons.Filled.Notifications, null, tint = BrandDeep, modifier = Modifier.size(18.dp))
-                        }
-                        Spacer(Modifier.width(10.dp))
-                        Column {
-                            Text("开启自动记账", fontWeight = FontWeight.SemiBold)
-                            Text("需要通知使用权，微信/支付宝付款后自动入账",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                    Spacer(Modifier.height(10.dp))
-                    Button(onClick = onOpenSettings,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp)) {
-                        Text("去授予通知使用权", fontWeight = FontWeight.SemiBold)
-                    }
+                Spacer(Modifier.height(10.dp))
+                Button(onClick = onOpenSettings,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp)) {
+                    Text("去授予通知使用权", fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -538,6 +564,7 @@ class MainActivity : ComponentActivity() {
         var accountIdx by remember { mutableStateOf(0) }
         var catIdx by remember { mutableStateOf(0) }
         var error by remember { mutableStateOf<String?>(null) }
+        val context = LocalContext.current
 
         AlertDialog(
             onDismissRequest = onDismiss,
@@ -594,18 +621,26 @@ class MainActivity : ComponentActivity() {
             confirmButton = {
                 Button(onClick = {
                     val fen = parseYuanToFen(amount)
-                    if (fen == null || fen == 0L) {
+                    // 仅接受正金额：拒绝 null/0/负数（负数会让报表聚合与图表占比失真）。
+                    if (fen == null || fen <= 0L) {
                         error = this@MainActivity.getString(R.string.invalid_amount)
                         return@Button
                     }
-                    container.manualAdd(
-                        amountFen = fen,
-                        type = type,
-                        merchant = merchant.ifBlank { null },
-                        accountId = accounts.getOrNull(accountIdx)?.id,
-                        categoryId = categories.getOrNull(catIdx)?.id,
-                    )
-                    onDismiss()
+                    // try/catch 兜住落库异常：给出可读错误而非崩溃；成功后弹「已保存」反馈，
+                    // 避免用户点保存后窗口关闭却不知道系统是否记上了。
+                    try {
+                        container.manualAdd(
+                            amountFen = fen,
+                            type = type,
+                            merchant = merchant.ifBlank { null },
+                            accountId = accounts.getOrNull(accountIdx)?.id,
+                            categoryId = categories.getOrNull(catIdx)?.id,
+                        )
+                        Toast.makeText(context, "已保存 ✓", Toast.LENGTH_SHORT).show()
+                        onDismiss()
+                    } catch (e: Exception) {
+                        error = "保存失败，请重试"
+                    }
                 }, shape = RoundedCornerShape(10.dp)) { Text(stringResource(R.string.save)) }
             },
             dismissButton = {
