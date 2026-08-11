@@ -26,6 +26,7 @@ object NotificationAdapter {
             direction = parsed.direction,
             bankTail = parsed.bankTail,
             paymentTool = parsed.paymentTool,
+            bankName = parsed.bankName,
         )
     }
 

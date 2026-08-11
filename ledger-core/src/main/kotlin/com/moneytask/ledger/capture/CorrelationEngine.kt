@@ -125,13 +125,20 @@ class CorrelationEngine(
         val payEv = members.firstOrNull { it.paymentTool != null }
 
         // 智能判断真实账户（§4.3）：
-        //  有银行渠道 -> 记真实扣款的银行卡（按卡尾号匹配；匹配不到则取任一银行账户）
+        //  有银行渠道 -> 记真实扣款的银行卡（卡尾号匹配优先；无尾号或匹配不到则按银行名
+        //                反查账户名；再兜底取任一银行账户）
         //  仅支付工具  -> 记微信钱包 / 支付宝余额
         //  信息不足    -> 默认账户（可改，不阻塞自动记账）
         val accountId: String? = when {
-            bankEv != null && bankEv.bankTail != null ->
-                accounts.firstOrNull { it.bankTail == bankEv.bankTail }?.id
-                    ?: accounts.firstOrNull { it.type == AccountType.BANK }?.id
+            bankEv != null -> {
+                val byTail = bankEv.bankTail?.let { tail ->
+                    accounts.firstOrNull { it.bankTail == tail }?.id
+                }
+                val byName = bankEv.bankName?.let { bn ->
+                    accounts.firstOrNull { it.type == AccountType.BANK && it.name.contains(bn) }?.id
+                }
+                byTail ?: byName ?: accounts.firstOrNull { it.type == AccountType.BANK }?.id
+            }
 
             payEv != null -> when {
                 payEv.paymentTool!!.contains("微信") -> accounts.firstOrNull { it.type == AccountType.WECHAT }?.id

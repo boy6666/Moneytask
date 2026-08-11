@@ -42,6 +42,7 @@ class CorrelationEngineTest {
         direction: Direction = Direction.UNKNOWN,
         bankTail: String? = null,
         paymentTool: String? = null,
+        bankName: String? = null,
     ) = CaptureEvent(
         id = "e${evId++}",
         channel = channel,
@@ -54,6 +55,7 @@ class CorrelationEngineTest {
         direction = direction,
         bankTail = bankTail,
         paymentTool = paymentTool,
+        bankName = bankName,
     )
 
     // T0 基座时间
@@ -206,6 +208,24 @@ class CorrelationEngineTest {
             val e = engine()
             e.onEvent(ev(Channel.NOTIF_BANK, 4210, T0, bankTail = "0000", direction = Direction.EXPENSE))
             assertEquals("acc-bank-6222", e.settleAll().first().accountId)
+        }
+        // 9e 银行渠道、无尾号但有银行名 -> 按账户名反查对应银行卡
+        run {
+            val e = engine()
+            e.onEvent(ev(Channel.NOTIF_BANK, 4210, T0, bankName = "招商银行", direction = Direction.EXPENSE))
+            assertEquals("acc-bank-6222", e.settleAll().first().accountId)
+        }
+        // 9f 银行名匹配不到任何账户名 -> 兜底任一银行账户
+        run {
+            val e = engine()
+            e.onEvent(ev(Channel.NOTIF_BANK, 4210, T0, bankName = "兴业银行", direction = Direction.EXPENSE))
+            assertEquals("acc-bank-6222", e.settleAll().first().accountId)
+        }
+        // 9g 卡尾号优先于银行名：尾号 8899=工商，银行名误给招商 -> 仍按尾号记到工商卡
+        run {
+            val e = engine()
+            e.onEvent(ev(Channel.NOTIF_BANK, 4210, T0, bankTail = "8899", bankName = "招商银行", direction = Direction.EXPENSE))
+            assertEquals("acc-bank-8899", e.settleAll().first().accountId)
         }
         // 9c 仅支付宝支付渠道 -> 支付宝余额
         run {

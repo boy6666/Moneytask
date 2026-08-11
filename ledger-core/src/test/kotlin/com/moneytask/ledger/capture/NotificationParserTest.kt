@@ -37,6 +37,34 @@ class NotificationParserTest {
     }
 
     // =============================================================
+    // 单元：识别具体银行名（来源名优先；正文兜底；取最长命中）
+    // =============================================================
+    @Test
+    fun bankName_fromSourceOrBody() {
+        // 来源名带银行名 -> 识别为招商银行
+        val fromSource = parser.parse(RawNotification(
+            sourcePackage = "com.cmbchina.ccd.pluto.cmbActivity",
+            sourceAppName = "招商银行",
+            title = "消费提醒",
+            text = "您尾号6222的信用卡消费42.10人民币",
+            timestamp = 1_700_000_000_000L,
+        ))
+        assertEquals("招商银行", fromSource.bankName)
+        assertEquals(Channel.NOTIF_BANK, fromSource.channel)
+        assertEquals("6222", fromSource.bankTail)
+
+        // 来源名无身份、银行名出现在正文 -> 从正文捞出来
+        val fromBody = parser.parse(RawNotification(
+            sourcePackage = "com.sms",
+            sourceAppName = "短信",
+            title = "【建设银行】",
+            text = "您尾号8899的储蓄卡消费42.10元。",
+            timestamp = 1_700_000_000_000L,
+        ))
+        assertEquals("建设银行", fromBody.bankName)
+    }
+
+    // =============================================================
     // 单元：微信支付通知 -> 支付渠道 + 卡尾号 + 支付工具
     // =============================================================
     @Test

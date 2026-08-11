@@ -29,4 +29,6 @@ data class CaptureEvent(
     val direction: Direction = Direction.UNKNOWN,
     val bankTail: String? = null,
     val paymentTool: String? = null,
+    /** 识别出的具体银行名（如"招商银行"）；与 [bankTail] 互补，用于按银行名归因。 */
+    val bankName: String? = null,
 )

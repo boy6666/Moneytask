@@ -1,9 +1,28 @@
 # Moneytask — 离线无感自动记账 App
 
-一个基于 Android 通知监听的**无感自动记账**方案：你在美团、京东、微信、支付宝、银行卡消费后，通知被捕获 → 自动归并成**恰好一笔**账目 → 智能判断真实扣款账户 → 本地自动分类 → 写入本地账本。全程**不联网**、数据**只存本地**、可一键导出/恢复备份。
+一个基于 Android 通知监听的**无感自动记账**应用：你在美团、京东、微信、支付宝、银行卡消费后，支付通知被捕获 → 自动归并成**恰好一笔**账目 → 智能判断真实扣款账户 → 本地自动分类 → 写入本地账本。全程**不联网**、数据**只存本机**、支持一键导出/恢复备份，并自带本地自绘图表报表。
 
-> 核心承诺（《MVP技术设计》）：
+> 核心承诺（《MVP 技术设计》）：
 > **绝不重复记账**（一条真实消费 = 恰好一笔账目）、**绝不误并**（两笔真消费绝不合并）。
+
+---
+
+## 功能一览（当前已交付）
+
+- **无感自动记账**：读取支付通知 → 解析金额/商户 → 自动入账，约 15 秒内沉淀为一笔。
+- **三层防重复 / 防误并**：单渠道幂等 → SHA-256 指纹去重 → 跨渠道链路归并（见下）。
+- **智能账户归因**：银行扣款→银行卡、支付工具→微信/支付宝钱包、信息不足→默认账户。
+- **本地智能分类**：商户名 → 分类（滴滴→交通、美团→餐饮、京东→购物…）。
+- **待复核**：方向/账户不足的账先落待复核，由用户确认或删除后再统计。
+- **手动补录**：漏记时手动记一笔（支出/收入 + 账户/分类），保存有反馈。
+- **账户管理**：新增 / 设默认 / 删除账户（见「账户管理说明」）。
+- **报表（Compose Canvas 自绘，离线无第三方图表库）**：
+  自然月收支总览、支出分类环形占比、近 7 天收支柱状、近 30 天结余走势、账户分布。
+- **数据备份 / 恢复**：一键导出 JSON 备份，可整库恢复；操作有进度与结果反馈。
+- **首启引导**：3 步说明 + 可随时重看。
+- **常驻省电前台服务**：保证监听与落账在后台可用。
+
+> 面向终端用户的使用方法见 **[用户说明手册.md](./用户说明手册.md)**。
 
 ---
 
@@ -15,9 +34,9 @@
 |---|---|---|
 | 美团 App | "您的美团订单已支付成功42.10元" | 商户 |
 | 微信支付 | "使用招商银行信用卡(1356)支付￥42.10" | 支付 |
-| 步步高/掌上生活 | "您尾号1356的招行信用卡消费42.10人民币" | 银行 |
+| 招行 App | "您尾号1356的招行信用卡消费42.10人民币" | 银行 |
 
-如果 APP 每收到一条就记一笔，这笔消费会被记 **3 次**。Moneytask 用**三层去重防线**把它们归并为 1 笔，且不误并两笔真正的消费。
+如果 App 每收到一条就记一笔，这笔消费会被记 **3 次**。Moneytask 用**三层去重防线**把它们归并为 1 笔，且不误并两笔真正的消费。
 
 ### 三层去重防线（绝不重复）
 
@@ -33,13 +52,23 @@
   - 仅支付工具 → 记**微信钱包 / 支付宝余额**；
   - 信息不足 → 落默认账户并标待复核，不阻塞记账。
 
-再加上**本地智能自动分类**（商户名 → 分类：滴滴→交通、美团→餐饮、京东→购物…）。
+外加**本地智能自动分类**（商户名 → 分类）。
+
+---
+
+## 账户管理说明
+
+「账户管理」管理的是用户自己的各类资金账户（现金 / 银行卡 / 微信 / 支付宝 / 其他），它决定自动记账时**这笔钱记到哪个账户**。归因按规则匹配：银行扣款**自动识别是哪家银行**（按账户名里的银行名匹配；通知带卡尾号时按尾号精确反查）→ 银行卡；支付工具含“微信/支付宝”→ 对应类型账户；信息不足 → 默认账户（兜底）。
+
+提供：**新增账户**（命名 + 类型）、**设默认**（兜底落账账户）、**删除账户**（带确认框；已删账户的历史流水保留，报表不再显示账户名）。
+
+> ⚠️ 已知缺口：**“按卡尾号精确定位到具体某张卡”是系统预留能力**（`Account.bankTail` 字段 + 尾号归因逻辑已就绪），但**当前 UI 未开放填写卡尾号**（新增账户仅名称 + 类型），故同一家银行的多张卡暂无法精确区分。升级方向见路线图。
 
 ---
 
 ## 项目结构
 
-Gradle **多模块**仓库：最能打的「防重复 / 防误并」核心逻辑抽成纯 JVM 模块 `ledger-core`（无头可测），Android 应用壳 `app` 只负责平台接线。
+Gradle **多模块**仓库：把最能打的「防重复 / 防误并」核心逻辑抽成纯 JVM 模块 `ledger-core`（无头可测），Android 应用壳 `app` 只负责平台接线。
 
 ```
 Moneytask/
@@ -57,17 +86,22 @@ Moneytask/
 │       ├── LedgerWriter.kt       结论 → 账目（幂等落账 + 自动分类 + 待复核标记）
 │       ├── LedgerStore.kt        持久化抽象（Android 层以 Room 实现）
 │       ├── Account.kt / Category.kt / Transaction.kt / ParsedCapture.kt  领域模型
-│       └── ...（配套 19 个单元/集成测试）
+│       └── ...（配套单元/集成测试）
 └── app/               Android 应用壳（Compose + Room + 通知监听）
     └── src/main/
         ├── java/com/moneytask/ledger/
-        │   ├── CapturePipeline.kt       采集 → 归并 → 落账串接（含定时结算）
-        │   ├── AppContainer.kt          手动依赖注入（MVP 阶段暂不引 Hilt）
-        │   ├── MoneytaskApplication.kt  应用入口，装配容器
-        │   ├── db/                      Room 实体 / DAO / Database / Seeder
-        │   ├── service/                 NotificationListenerService（读取支付通知）
-        │   └── ui/                      MainActivity（Compose UI）
-        └── res/                         字符串、主题、矢量图标
+        │   ├── capture/CapturePipeline.kt  采集 → 归并 → 落账串接（定时结算 15s）
+        │   ├── AppContainer.kt             手动依赖注入（MVP 阶段暂不引 Hilt）
+        │   ├── MoneytaskApplication.kt     应用入口，装配容器
+        │   ├── db/                         Room 实体 / DAO / Database / Seeder / BackupManager
+        │   ├── service/                    NotificationListenerService（读支付通知）+ 前台服务
+        │   └── ui/
+        │       ├── MainActivity.kt         首页（总览/流水/待复核/记一笔/授权引导）
+        │       ├── StatsScreen.kt          报表页
+        │       ├── MeScreen.kt             我的（账户/备份/引导）
+        │       ├── OnboardingScreen.kt     首启引导
+        │       └── charts/                 自绘图表（Donut / GroupedBar / AreaLine）
+        └── res/                            字符串、主题、图标
 ```
 
 **说明**：`ledger-core` 刻意不引入 Android / Room 依赖，目标是**无头可测**；Room 只落在 `app` 模块，通过 `LedgerStore` 接口隔离。核心三层去重（sourceKey 幂等 → SHA-256 指纹 → 跨渠道归并）全在 JVM 层，可单测。
@@ -78,11 +112,12 @@ Moneytask/
 
 ```bash
 # 需要 JDK 17+（本机以 JDK 21 编译、JVM target 17），SDK 路径见 local.properties（不必提交）
-./gradlew :ledger-core:test      # 核心 19 个单元/集成测试
+./gradlew :ledger-core:test      # 核心单元/集成测试
 ./gradlew :app:assembleDebug     # 编译应用壳 → app/build/outputs/apk/debug/app-debug.apk
+./gradlew :app:assembleRelease   # Release 签名打包（签名配置见 app/build.gradle.kts）
 ```
 
-19 个测试全绿，覆盖真实通知样本的**端到端**验证：
+`ledger-core` 测试覆盖真实通知样本的**端到端**验证：
 
 - 美团 6 条真实通知 → **恰好 1 笔**，账户=招商银行卡(1356)、分类=餐饮
 - 滴滴 / 信用卡还款 → 各自 1 笔
@@ -96,24 +131,43 @@ Moneytask/
 
 | 领域 | 选型 |
 |---|---|
-| 核心逻辑 | Kotlin 2.x（纯 JVM，JVM target 17） |
-| UI | Jetpack Compose + Material3（Android 壳） |
+| 核心逻辑 | Kotlin（纯 JVM，JVM target 17） |
+| UI | Jetpack Compose + Material3（Android 壳），图表为 Compose Canvas 自绘 |
 | 本地库 | Room + SQLite（Android 壳） |
-| 系统能力 | NotificationListenerService / ForegroundService |
-| 订阅/数据库 | Gradle（Kotlin DSL），JUnit 5 / kotlin.test |
+| 系统能力 | NotificationListenerService / ForegroundService / Settings 授权跳转 |
+| 构建/测试 | Gradle（Kotlin DSL），JUnit 5 / kotlin.test |
+
+---
+
+## 质量与产品化要求
+
+- **纯本地**：应用不申请 `INTERNET` 权限，无任何联网路径。
+- **签名字节**：`app/keystore/` 已加入 `.gitignore`，Release 密钥**绝不入库**——请务必自行备份该 keystore，否则无法升级签名。
+- **隐私**：通知读取仅在本机解析；数据与备份均存本机，卸载即清。
 
 ---
 
 ## 路线图
 
-- **[M1] 已基本完成**：链路归并引擎 + 解析器 + 智能归因 + 智能分类 + 落账（19 测试）。
-- **Android 壳**：NotificationListenerService 监听、Room 实体 + Migration(1→2) + DatabaseSeeder、权限引导、常驻省电。
-- **Phase 2**：截屏 OCR、周期/订阅记账、数据导入导出。
-- **Phase 3**：手动录入兜底、账户/分类管理、报表。
-- **Phase 4**：花销预测（同比/环比）、特殊时段群组（寒暑假等）。
+**已交付**
+- [x] **M1**：链路归并引擎 + 解析器 + 智能归因 + 智能分类 + 落账（端到端测试全绿）。
+- [x] **M2**：Android 壳 —— 通知监听、Room 实体 + Migration(1→2)、DatabaseSeeder、授权引导、常驻省电前台服务。
+- [x] **M3**：手动补录 / 待复核、supported_sources 白名单、时间感知。
+- [x] **M4**：备份 / 恢复、报表（自绘图表）、账户管理、账户类型、首启引导、Release 签名打包。
+- [x] **M5**：代码复查修复（图表正确性、授权返回刷新、响应式报表、负数金额拦截）+ UX 反馈补全（toast / 确认框 / 进度指示 / 首帧加载）。
 
-> 许可证：核心逻辑为原创（MIT 式中立）；复用了 RealtimeLedger(MIT) 的解析/去重思路；AutoAccounting(GPL3) 仅作参考不并入。
+**规划（未开始）**
+- [ ] 账户编辑开放**卡尾号**填写，启用“按卡尾号精确归因”。
+- [ ] 分类管理界面（自定义分类 / 合并 / 排序的 UI 化）。
+- [ ] 报表丰富：同比/环比、特殊时段群组（寒暑假等）。
+- [ ] 截屏 OCR 兜底、周期/订阅记账、多端同步（可选，需权衡纯本地约束）。
 
 ---
 
-*设计文档与调研材料不随仓库提交（见 `.gitignore`）。*
+## 许可
+
+核心逻辑为原创（MIT 式中立）；复用了 [RealtimeLedger](https://github.com/) (MIT) 的解析/去重思路；[AutoAccounting](https://github.com/) (GPL3) 仅作参考不并入。第三方库（Compose、Room 等）遵循各自许可。
+
+---
+
+*设计文档与调研材料不随仓库提交（见 `.gitignore`）。用户使用说明见 [用户说明手册.md](./用户说明手册.md)。*

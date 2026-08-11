@@ -16,6 +16,7 @@ import kotlin.math.min
  */
 class NotificationParser(
     private val classifier: ChannelClassifier = ChannelClassifier(),
+    private val bankNames: List<String> = ChannelClassifier.defaultBankNames,
 ) {
     // ---- 金额候选与语义 ----
     private val amountRegex = Regex("(?<![\\d:])(?:人民币\\s*)?[¥￥]?\\s*(\\d{1,3}(?:,\\d{3})+|\\d{1,8})(?:\\.(\\d{1,2}))?\\s*(?:元)?(?!\\d)")
@@ -80,6 +81,7 @@ class NotificationParser(
         val amount = candidates.maxByOrNull { it.score }
         val merchant = detectMerchant(text)?.takeUnless { it in listOf("微信支付", "支付宝", raw.sourceAppName) }
         val bankTail = detectBankTail(text)
+        val bankName = detectBankName(raw)
         val payTool = detectPayTool(text) ?: detectWallet(payToolText(text))
         val channel = classifier.classify(raw.sourceAppName, raw.title, raw.text)
 
@@ -103,6 +105,7 @@ class NotificationParser(
             bankTail = bankTail,
             paymentTool = payTool,
             channel = channel,
+            bankName = bankName,
             confidence = confidence,
             evidence = evidence,
         )
@@ -131,6 +134,15 @@ class NotificationParser(
 
     private fun detectBankTail(text: String): String? =
         bankTailPatterns.firstNotNullOfOrNull { it.find(text)?.groupValues?.getOrNull(1) }
+
+    /**
+     * 识别具体银行名（如"招商银行"）。来源名优先，其次标题+正文；多个命中取**最长**者，
+     * 避免"中国银行/农业银行"被单字子串误判。渠道判定仍走 [ChannelClassifier]，这里只负责把名字捞出来。
+     */
+    private fun detectBankName(raw: RawNotification): String? {
+        val text = raw.sourceAppName + " | " + raw.title + " | " + raw.text
+        return bankNames.filter { text.contains(it) }.maxByOrNull { it.length }
+    }
 
     /** 支付方式中的"卡名"，如"招商银行信用卡"。 */
     private fun detectPayTool(text: String): String? =

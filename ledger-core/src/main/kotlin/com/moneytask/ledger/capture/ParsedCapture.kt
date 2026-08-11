@@ -33,4 +33,9 @@ data class ParsedCapture(
     val channel: Channel?,
     val confidence: Double,
     val evidence: List<String>,
+    /**
+     * 识别出的具体银行名（如"招商银行"），供归因按银行名反查对应银行卡账户。
+     * 与 [bankTail] 互补：尾号匹配优先；无尾号时靠银行名匹配（卡尾号开放前的主体归因）。
+     */
+    val bankName: String? = null,
 )
