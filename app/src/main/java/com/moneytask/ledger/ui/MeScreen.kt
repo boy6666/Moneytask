@@ -31,6 +31,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -57,7 +58,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.moneytask.ledger.AppContainer
 import com.moneytask.ledger.db.AccountEntity
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** 账户类型可选项（写库用 type 常量）。 */
 private val ACCOUNT_TYPES = listOf(
@@ -82,6 +85,8 @@ internal fun MeScreen(c: AppContainer, onReplayOnboarding: () -> Unit) {
     var showAddAccount by remember { mutableStateOf(false) }
     var importUri by remember { mutableStateOf<Uri?>(null) }
     var deletingAccount by remember { mutableStateOf<AccountEntity?>(null) }
+    var exportBusy by remember { mutableStateOf(false) }
+    var importBusy by remember { mutableStateOf(false) }
 
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -121,17 +126,35 @@ internal fun MeScreen(c: AppContainer, onReplayOnboarding: () -> Unit) {
                             style = MaterialTheme.typography.bodySmall)
                         Spacer(Modifier.height(10.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Button(onClick = {
-                                scope.launch { snackbar.showSnackbar(doExport(context, c)) }
-                            }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp)) {
-                                Icon(Icons.Filled.Share, null, modifier = Modifier.size(18.dp))
+                            Button(
+                                onClick = {
+                                    if (exportBusy || importBusy) return@Button
+                                    exportBusy = true
+                                    scope.launch {
+                                        // 生成备份文件在 IO；分享面板需主线程拉起。
+                                        val (intent, msg) = withContext(Dispatchers.IO) { buildExport(context, c) }
+                                        exportBusy = false
+                                        intent?.let { context.startActivity(it) }
+                                        snackbar.showSnackbar(msg)
+                                    }
+                                },
+                                enabled = !exportBusy && !importBusy,
+                                modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp)) {
+                                if (exportBusy) {
+                                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                } else {
+                                    Icon(Icons.Filled.Share, null, modifier = Modifier.size(18.dp))
+                                }
                                 Spacer(Modifier.width(4.dp))
-                                Text("导出备份")
+                                Text(if (exportBusy) "导出中…" else "导出备份")
                             }
-                            OutlinedButton(onClick = {
-                                importLauncher.launch(arrayOf("application/json", "application/octet-stream", "*/*"))
-                            }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp)) {
-                                Text("恢复备份")
+                            OutlinedButton(
+                                onClick = {
+                                    importLauncher.launch(arrayOf("application/json", "application/octet-stream", "*/*"))
+                                },
+                                enabled = !exportBusy && !importBusy,
+                                modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp)) {
+                                Text(if (importBusy) "恢复中…" else "恢复备份")
                             }
                         }
                     }
@@ -194,9 +217,15 @@ internal fun MeScreen(c: AppContainer, onReplayOnboarding: () -> Unit) {
     importUri?.let { uri ->
         ImportConfirmDialog(c, uri,
             onConfirm = {
-                scope.launch { snackbar.showSnackbar(doImport(context, c, uri)) }
-                refresh++
                 importUri = null
+                importBusy = true
+                scope.launch {
+                    // 整库重建在 IO 执行，期间按钮显示「恢复中…」并禁用，避免主线程冻结无反馈。
+                    val msg = withContext(Dispatchers.IO) { doImport(context, c, uri) }
+                    importBusy = false
+                    snackbar.showSnackbar(msg)
+                    refresh++
+                }
             },
             onDismiss = { importUri = null })
     }
@@ -243,17 +272,19 @@ private fun AccountCard(name: String, type: String, isDefault: Boolean,
     }
 }
 
-private fun doExport(context: Context, c: AppContainer): String {
+/** 在 IO 线程生成备份文件；返回 (要启动的分享 Intent, 结果文案)。 */
+private fun buildExport(context: Context, c: AppContainer): Pair<Intent?, String> {
     val count = c.transactionCount()
-    val file = runCatching { c.exportBackup() }.getOrNull() ?: return "导出失败，请重试"
+    val file = runCatching { c.exportBackup() }.getOrNull()
+        ?: return null to "导出失败，请重试"
     val uri = c.backupShareUri(file)
     val intent = Intent(Intent.ACTION_SEND).apply {
         type = "application/json"
         putExtra(Intent.EXTRA_STREAM, uri)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
-    context.startActivity(Intent.createChooser(intent, "导出 Moneytask 备份（$count 笔记账）"))
-    return "已生成 $count 笔记账的备份"
+    return Intent.createChooser(intent, "导出 Moneytask 备份（$count 笔记账）") to
+        "已生成 $count 笔记账的备份"
 }
 
 private fun doImport(context: Context, c: AppContainer, uri: Uri): String = runCatching {
