@@ -42,6 +42,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -89,6 +90,7 @@ import com.moneytask.ledger.capture.Transaction
 import com.moneytask.ledger.capture.TxnType
 import com.moneytask.ledger.service.CaptureForegroundService
 import com.moneytask.ledger.service.PaymentNotificationListenerService
+import kotlinx.coroutines.flow.first
 
 /** 记账 App 专属配色：偏青绿的"金流"主色，替代默认紫。 */
 private val MoneytaskColors = lightColorScheme(
@@ -169,6 +171,12 @@ class MainActivity : ComponentActivity() {
         var showPending by remember { mutableStateOf(false) }
         var showAdd by remember { mutableStateOf(false) }
         var pendingDelete by remember { mutableStateOf<Transaction?>(null) }
+        // 首帧加载标记：recentTransactions 首次发射前为 false，避免「空态」闪一下。
+        var txnsLoaded by remember { mutableStateOf(false) }
+        androidx.compose.runtime.LaunchedEffect(Unit) {
+            c.pipeline.recentTransactions.first()
+            txnsLoaded = true
+        }
         val onResumeGranted = remember {
             {
                 listenerGranted = isListenerEnabled()
@@ -223,10 +231,10 @@ class MainActivity : ComponentActivity() {
                     }
                 } else {
                     item { SectionTitle(stringResource(R.string.recent_title)) }
-                    if (txns.isEmpty()) {
-                        item { EmptyState(emoji = "🧾", title = stringResource(R.string.empty_state), sub = "点右下角“记一笔”，或授予通知使用权后自动记账") }
-                    } else {
-                        items(txns, key = { it.id }) { t -> TransactionRow(t, iconOf) }
+                    when {
+                        !txnsLoaded -> item { LoadingState() }
+                        txns.isEmpty() -> item { EmptyState(emoji = "🧾", title = stringResource(R.string.empty_state), sub = "点右下角“记一笔”，或授予通知使用权后自动记账") }
+                        else -> items(txns, key = { it.id }) { t -> TransactionRow(t, iconOf) }
                     }
                 }
 
@@ -481,6 +489,18 @@ class MainActivity : ComponentActivity() {
     private fun onDeleteClick(id: String) {
         container().deleteTransaction(id)
         Toast.makeText(this@MainActivity, "已删除", Toast.LENGTH_SHORT).show()
+    }
+
+    /** 首帧加载过渡：数据流尚未完成首次发射时显示转菊花。 */
+    @Composable
+    private fun LoadingState() {
+        Column(Modifier.fillMaxWidth().padding(vertical = 36.dp),
+            horizontalAlignment = Alignment.CenterHorizontally) {
+            CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 3.dp)
+            Spacer(Modifier.height(10.dp))
+            Text("加载中…", color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall)
+        }
     }
 
     /** 精致空状态。 */
