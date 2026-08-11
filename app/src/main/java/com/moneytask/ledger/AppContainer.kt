@@ -3,8 +3,11 @@ package com.moneytask.ledger
 import android.content.Context
 import android.net.Uri
 import com.moneytask.ledger.capture.Account
+import com.moneytask.ledger.capture.BillCsvParser
+import com.moneytask.ledger.capture.BillImportEngine
 import com.moneytask.ledger.capture.CapturePipeline
 import com.moneytask.ledger.capture.Category
+import com.moneytask.ledger.capture.ParsedBill
 import com.moneytask.ledger.capture.CorrelationEngine
 import com.moneytask.ledger.capture.LedgerWriter
 import com.moneytask.ledger.capture.NotificationAdapter
@@ -138,6 +141,28 @@ class AppContainer(private val context: Context) {
 
     /** 从系统文件选择器选中 Uri 整库恢复，返回恢复的账目条数。 */
     fun importBackup(uri: Uri): Int = BackupManager.import(context, dao, uri)
+
+    // ---- 账单导入 ----
+
+    /** 读取并解析账单 URI → [ParsedBill]（供 UI 预览；不落库）。 */
+    fun parseBillUri(uri: Uri): ParsedBill = runBlocking(io) {
+        val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+            ?: throw IllegalArgumentException("无法读取账单文件")
+        BillCsvParser.parse(text)
+    }
+
+    /**
+     * 把已解析且用户确认的账单并入账本：
+     * 按「金额+时间+商户」去重——已存在则覆盖补全（清除待复核），否则新增。
+     * @return [BillImportEngine.BillImportResult]，其中 added/updated 已持久化。
+     */
+    fun commitBillImport(bill: ParsedBill): BillImportEngine.BillImportResult = runBlocking(io) {
+        val existing = dao.all().map { it.toDomain() }
+        val result = BillImportEngine().run(bill.rows, existing, store.accounts(), System.currentTimeMillis())
+        result.added.forEach { dao.insert(it.toEntity()) }
+        result.updated.forEach { dao.update(it.toEntity()) }
+        result
+    }
 
     // ---- 统计 ----
 

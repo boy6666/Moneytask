@@ -38,7 +38,11 @@ object LedgerMappers {
         paymentMethod = paymentMethod,
         note = note,
         groupId = groupId,
-        source = if (source == "MANUAL") TxnSource.MANUAL else TxnSource.AUTO,
+        source = when (source) {
+            "MANUAL" -> TxnSource.MANUAL
+            "IMPORT" -> TxnSource.IMPORT
+            else -> TxnSource.AUTO
+        },
         isPendingReview = isPendingReview,
         manuallyEdited = manuallyEdited,
         createdAt = createdAt,

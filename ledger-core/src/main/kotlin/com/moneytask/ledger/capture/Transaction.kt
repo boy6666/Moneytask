@@ -4,7 +4,7 @@ package com.moneytask.ledger.capture
 enum class TxnType { EXPENSE, INCOME }
 
 /** 账目来源（《MVP技术设计》3.3 source）。 */
-enum class TxnSource { AUTO, MANUAL }
+enum class TxnSource { AUTO, MANUAL, IMPORT }
 
 /**
  * 用户可见的一笔账目（《MVP技术设计》3.3 领域模型）。

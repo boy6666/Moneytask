@@ -57,6 +57,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.moneytask.ledger.AppContainer
+import com.moneytask.ledger.capture.BillPlatform
+import com.moneytask.ledger.capture.ParsedBill
 import com.moneytask.ledger.db.AccountEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -87,6 +89,24 @@ internal fun MeScreen(c: AppContainer, onReplayOnboarding: () -> Unit) {
     var deletingAccount by remember { mutableStateOf<AccountEntity?>(null) }
     var exportBusy by remember { mutableStateOf(false) }
     var importBusy by remember { mutableStateOf(false) }
+
+    // ---- 账单导入 ----
+    var billParsing by remember { mutableStateOf(false) }
+    var billImportBusy by remember { mutableStateOf(false) }
+    var billPreview by remember { mutableStateOf<ParsedBill?>(null) }
+
+    val billImportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            billParsing = true
+            scope.launch {
+                billPreview = runCatching { withContext(Dispatchers.IO) { c.parseBillUri(uri) } }
+                    .getOrElse { ParsedBill(BillPlatform.UNKNOWN, emptyList(), listOf(it.message ?: "解析失败")) }
+                billParsing = false
+            }
+        }
+    }
 
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -162,6 +182,32 @@ internal fun MeScreen(c: AppContainer, onReplayOnboarding: () -> Unit) {
             }
 
             item { Spacer(Modifier.height(4.dp)) }
+            item { Section("📥 导入账单") }
+            item {
+                Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFBFCFC))) {
+                    Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                        Text("支持微信支付 / 支付宝 / 银行 App 导出的账单 CSV。去重后并入账本：已记过的自动覆盖补全、绝不重复记。",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall)
+                        Spacer(Modifier.height(10.dp))
+                        Button(
+                            onClick = { billImportLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "application/csv", "text/*", "*/*")) },
+                            enabled = !billParsing && !billImportBusy,
+                            modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)) {
+                            if (billParsing || billImportBusy) {
+                                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Filled.Add, null, modifier = Modifier.size(18.dp))
+                            }
+                            Spacer(Modifier.width(4.dp))
+                            Text(if (billParsing) "解析中…" else if (billImportBusy) "导入中…" else "选择账单 CSV")
+                        }
+                    }
+                }
+            }
+
+            item { Spacer(Modifier.height(4.dp)) }
             item { Section("ℹ️ 关于") }
             item {
                 Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
@@ -229,6 +275,58 @@ internal fun MeScreen(c: AppContainer, onReplayOnboarding: () -> Unit) {
             },
             onDismiss = { importUri = null })
     }
+
+    billPreview?.let { preview ->
+        val rowsOk = preview.rows.isNotEmpty()
+        AlertDialog(
+            onDismissRequest = { billPreview = null },
+            title = { Text("导入账单确认") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("识别为「${platformLabel(preview.platform)}」账单", fontWeight = FontWeight.SemiBold)
+                    Text("将导入 ${preview.rows.size} 笔：已存在（按金额+时间+商户匹配）的自动覆盖补全，绝不重复记。",
+                        style = MaterialTheme.typography.bodyMedium)
+                    if (preview.errors.isNotEmpty()) {
+                        Text("另有 ${preview.errors.size} 行被跳过（金额/方向无法识别）：",
+                            color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        Text(preview.errors.take(3).joinToString("\n"), color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.labelSmall, maxLines = 5)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val p = preview
+                        billPreview = null
+                        billImportBusy = true
+                        scope.launch {
+                            val r = runCatching { withContext(Dispatchers.IO) { c.commitBillImport(p) } }
+                            billImportBusy = false
+                            snackbar.showSnackbar(r.fold(
+                                onSuccess = { res ->
+                                    "已导入 ${res.added.size} 笔新增、覆盖 ${res.updated.size} 笔"
+                                },
+                                onFailure = { "导入失败：${it.message}" })
+                            )
+                            refresh++
+                        }
+                    },
+                    enabled = rowsOk && !billImportBusy,
+                    shape = RoundedCornerShape(10.dp)) {
+                    Text(if (billImportBusy) "导入中…" else "导入 ${preview.rows.size} 笔")
+                }
+            },
+            dismissButton = { TextButton(onClick = { billPreview = null }) { Text("取消") } },
+        )
+    }
+}
+
+private fun platformLabel(p: BillPlatform): String = when (p) {
+    BillPlatform.WECHAT -> "微信支付"
+    BillPlatform.ALIPAY -> "支付宝"
+    BillPlatform.BANK -> "银行流水"
+    BillPlatform.UNKNOWN -> "未知"
 }
 
 @Composable
