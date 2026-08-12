@@ -60,6 +60,8 @@ import com.moneytask.ledger.AppContainer
 import com.moneytask.ledger.capture.BillPlatform
 import com.moneytask.ledger.capture.ParsedBill
 import com.moneytask.ledger.db.AccountEntity
+import com.moneytask.ledger.db.PeriodEntity
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -85,10 +87,16 @@ internal fun MeScreen(c: AppContainer, onReplayOnboarding: () -> Unit) {
     val txnCount = remember { c.transactionCount() }
 
     var showAddAccount by remember { mutableStateOf(false) }
+    var showBudgetDialog by remember { mutableStateOf(false) }
+    var showPeriodDialog by remember { mutableStateOf(false) }
     var importUri by remember { mutableStateOf<Uri?>(null) }
     var deletingAccount by remember { mutableStateOf<AccountEntity?>(null) }
+    var deletingPeriod by remember { mutableStateOf<PeriodEntity?>(null) }
     var exportBusy by remember { mutableStateOf(false) }
     var importBusy by remember { mutableStateOf(false) }
+
+    val budgetFen = remember(refresh) { c.monthlyBudgetFen() }
+    val periods by c.periodsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
 
     // ---- 账单导入 ----
     var billParsing by remember { mutableStateOf(false) }
@@ -132,6 +140,46 @@ internal fun MeScreen(c: AppContainer, onReplayOnboarding: () -> Unit) {
                     Icon(Icons.Filled.Add, null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("新增账户", fontWeight = FontWeight.Medium)
+                }
+            }
+
+            item { Spacer(Modifier.height(4.dp)) }
+            item { Section("💰 月度预算") }
+            item {
+                BudgetCard(budgetFen, onEdit = { showBudgetDialog = true })
+            }
+
+            item { Spacer(Modifier.height(4.dp)) }
+            item { Section("🗓️ 时段设置（寒假/暑假/学期）") }
+            item {
+                Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFBFCFC))) {
+                    Column(Modifier.fillMaxWidth().padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("把时间段标为寒假/暑假/学期，报表页可按时段分开统计、并与同类历史时段对比。",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall)
+                        periods.forEach { p ->
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("${p.name} · ${periodTypeLabel(p.type)}",
+                                        fontWeight = FontWeight.Medium, style = MaterialTheme.typography.bodyMedium)
+                                    Text("${formatDate(p.startMillis)} ~ ${formatDate(p.endMillis - 1)}",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        style = MaterialTheme.typography.labelSmall)
+                                }
+                                IconButton(onClick = { deletingPeriod = p }) {
+                                    Icon(Icons.Filled.Delete, "删除", tint = Color(0xFFB0BEC5), modifier = Modifier.size(20.dp))
+                                }
+                            }
+                        }
+                        OutlinedButton(onClick = { showPeriodDialog = true }, modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp)) {
+                            Icon(Icons.Filled.Add, null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("新增时段")
+                        }
+                    }
                 }
             }
 
@@ -240,6 +288,47 @@ internal fun MeScreen(c: AppContainer, onReplayOnboarding: () -> Unit) {
             refresh++
             showAddAccount = false
         })
+    }
+    if (showBudgetDialog) {
+        AddBudgetDialog(current = budgetFen) { fen ->
+            showBudgetDialog = false
+            if (fen != null) {
+                c.setMonthlyBudgetFen(fen)
+                refresh++
+                scope.launch {
+                    snackbar.showSnackbar(
+                        if (fen <= 0) "已清除月度预算"
+                        else "月度预算设为 ¥${formatYuan(fen)}/月"
+                    )
+                }
+            }
+        }
+    }
+    if (showPeriodDialog) {
+        AddPeriodDialog { name, type, start, end ->
+            showPeriodDialog = false
+            if (name == null) return@AddPeriodDialog
+            val ok = c.addPeriod(name, type, start, end)
+            refresh++
+            scope.launch {
+                snackbar.showSnackbar(if (ok) "已添加时段「$name」" else "时段信息不完整，请检查名称与起止日期")
+            }
+        }
+    }
+    deletingPeriod?.let { p ->
+        AlertDialog(
+            onDismissRequest = { deletingPeriod = null },
+            title = { Text("删除时段「${p.name}」？") },
+            text = { Text("只删除该时段标记，不会删除任何账目。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    c.deletePeriod(p.id)
+                    deletingPeriod = null
+                    refresh++
+                }) { Text("删除", color = MoneyRed) }
+            },
+            dismissButton = { TextButton(onClick = { deletingPeriod = null }) { Text("取消") } },
+        )
     }
     // 删除账户不可逆且其历史流水仍留在报表中（会显示为原始 ID），先确认再删。
     deletingAccount?.let { acc ->
@@ -440,5 +529,107 @@ private fun ImportConfirmDialog(c: AppContainer, uri: Uri, onConfirm: () -> Unit
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
+}
+
+// ---- 月度预算 / 时段设置 ----
+
+/** 时段类型可选项（code → 中文标签）。相同 type 的时段在报表里归为一类对比。 */
+private val PERIOD_TYPES = listOf(
+    "WINTER" to "寒假", "SUMMER" to "暑假", "TERM" to "学期", "CUSTOM" to "自定义",
+)
+
+/** 「我的」页预算卡片：显示/编辑每月预算。 */
+@Composable
+private fun BudgetCard(budgetFen: Long?, onEdit: () -> Unit) {
+    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFFBFCFC))) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                if (budgetFen == null) {
+                    Text("尚未设置每月花销预算", color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium)
+                    Text("设置后报表页会显示本月剩余可花", color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelSmall)
+                } else {
+                    Text("每月预算", color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelMedium)
+                    Text("¥ ${formatYuan(budgetFen)} /月", fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                        color = BrandDeep)
+                }
+            }
+            TextButton(onClick = onEdit) {
+                Text(if (budgetFen == null) "设置" else "修改", color = Brand, fontWeight = FontWeight.Medium)
+            }
+        }
+    }
+}
+
+/** 设置/修改月度预算弹窗。onDone(null)=取消；onDone(x)=设为 x 分（x<=0 表示清除）。 */
+@Composable
+private fun AddBudgetDialog(current: Long?, onDone: (Long?) -> Unit) {
+    var text by remember { mutableStateOf(if (current != null) formatYuan(current).replace(",", "") else "") }
+    val parsed = parseYuanToFen(text)
+    AlertDialog(
+        onDismissRequest = { onDone(null) },
+        title = { Text(if (current == null) "设置每月预算" else "修改每月预算") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(value = text, onValueChange = { text = it },
+                    label = { Text("每月预算（元）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Text("例如 1500 表示每月可花 1500 元；报表页会显示本月剩余。",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onDone(parsed) }, enabled = parsed != null) { Text("保存") }
+        },
+        dismissButton = {
+            if (current != null) {
+                TextButton(onClick = { onDone(0L) }) { Text("清除", color = MoneyRed) }
+            }
+            TextButton(onClick = { onDone(null) }) { Text("取消") }
+        },
+    )
+}
+
+/** 新增时段弹窗。onDone(null,..)=取消；否则为 (名称, 类型, 起始毫秒, 结束毫秒[次日0点,不含])。 */
+@Composable
+private fun AddPeriodDialog(onDone: (String?, String, Long, Long) -> Unit) {
+    var name by remember { mutableStateOf("") }
+    var type by remember { mutableStateOf("SUMMER") }
+    var start by remember { mutableStateOf("") }
+    var end by remember { mutableStateOf("") }
+    val startMs = parseDateToMillis(start)
+    val endMs = parseDateToMillis(end)
+    val dayMs = 86_400_000L
+    val valid = name.isNotBlank() && startMs != null && endMs != null && endMs >= startMs
+
+    AlertDialog(
+        onDismissRequest = { onDone(null, type, 0, 0) },
+        title = { Text("新增时段") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(value = name, onValueChange = { name = it },
+                    label = { Text("名称，如 2026 暑假") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Text("类型", style = MaterialTheme.typography.labelMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PERIOD_TYPES.forEach { (code, label) ->
+                        FilterChip(selected = type == code, onClick = { type = code }, label = { Text(label) })
+                    }
+                }
+                OutlinedTextField(value = start, onValueChange = { start = it },
+                    label = { Text("开始日期 yyyy-MM-dd") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = end, onValueChange = { end = it },
+                    label = { Text("结束日期 yyyy-MM-dd（含当天）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                onDone(name.trim(), type, startMs!!, endMs!! + dayMs)
+            }, enabled = valid) { Text("保存") }
+        },
+        dismissButton = { TextButton(onClick = { onDone(null, type, 0, 0) }) { Text("取消") } },
     )
 }

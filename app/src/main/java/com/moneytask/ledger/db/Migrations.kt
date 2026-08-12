@@ -19,3 +19,24 @@ val MIGRATION_1_2: Migration = object : Migration(1, 2) {
         db.execSQL("ALTER TABLE categories ADD COLUMN sortOrder INTEGER NOT NULL DEFAULT 0")
     }
 }
+
+/**
+ * v2 → v3 迁移（新增两张表，无存量表结构变更，不影响旧数据）：
+ *  - `app_settings`：键值设置（月度预算等）。
+ *  - `time_periods`：寒假/暑假/学期/自定义时间段，供报表按时段分开统计。
+ */
+val MIGRATION_2_3: Migration = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `app_settings` (" +
+                "`key` TEXT NOT NULL, `value` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`key`))"
+        )
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `time_periods` (" +
+                "`id` TEXT NOT NULL, `name` TEXT NOT NULL, `type` TEXT NOT NULL, " +
+                "`startMillis` INTEGER NOT NULL, `endMillis` INTEGER NOT NULL, " +
+                "`createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))"
+        )
+    }
+}

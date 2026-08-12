@@ -8,16 +8,18 @@ import androidx.room.RoomDatabase
 /**
  * 本地账本文库（《MVP技术设计》3）。
  *
- * schema 演进通过 [MIGRATION_1_2] 完成（现为 version 2）。exportSchema 开启并把 schema 输出到
- * app/schemas，供 MigrationTestHelper 做升级回归测试。
+ * schema 演进通过 [MIGRATION_1_2]、[MIGRATION_2_3] 完成（现为 version 3）。exportSchema 开启并把
+ * schema 输出到 app/schemas，供 MigrationTestHelper 做升级回归测试。
  */
 @Database(
     entities = [
         AccountEntity::class,
         CategoryEntity::class,
         TransactionEntity::class,
+        SettingEntity::class,
+        PeriodEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -33,7 +35,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "moneytask.db",
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build()
                     .also { instance = it }
             }

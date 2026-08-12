@@ -1,6 +1,7 @@
 package com.moneytask.ledger.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,14 +16,20 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -32,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.moneytask.ledger.AppContainer
+import com.moneytask.ledger.db.PeriodEntity
 import kotlin.math.roundToInt
 import com.moneytask.ledger.ui.charts.AreaLineChart
 import com.moneytask.ledger.ui.charts.DonutChart
@@ -48,48 +56,78 @@ private val OtherColor = Color(0xFFB0BEC5)
 private data class LegendRow(val color: Color, val icon: String, val name: String,
                              val percent: Float, val total: Long)
 
+/** 同类时段对比行：时段 + 支出 + 天数（日均=支出/天数）。 */
+private data class PeriodCompareRow(val period: PeriodEntity, val expense: Long, val days: Long)
+
 /**
- * 报表页（M4 收尾 + 前端增强）：自然月收支总览、支出分类环形占比、
- * 近 7 天收支柱状、近 30 天累计结余走势、账户分布。全部图表为 Compose Canvas 自绘（离线、无第三方库）。
+ * 报表页：月度预算（本月剩余）、统计范围切换（本月 / 寒假·暑假·学期 等时段）、
+ * 自然月收支总览、支出分类环形占比、近 7 天收支柱状、近 30 天累计结余走势、账户分布。
+ * 全部图表为 Compose Canvas 自绘（离线、无第三方库）。
  */
 @Composable
 internal fun StatsScreen(c: AppContainer) {
     val month = currentMonthLabel()
+    val periods by c.periodsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+    var selectedPeriodId by remember { mutableStateOf<String?>(null) }
+
     // 数据修订信号：任何落账/删除/复核都会令 recentTransactions 重新发射。
     // 用它作聚合 remember 的 key，使停留在本页时新账目也能即时刷新（而非永久快照）。
     val revision = c.pipeline.recentTransactions
         .collectAsStateWithLifecycle(initialValue = emptyList()).value
 
-    val range = remember(c) { c.monthRange() }
+    // 统计范围：null = 本月（自然月）；否则选中时段 [start,end)。总览/分类/账户跟随它。
+    val selectedPeriod = periods.firstOrNull { it.id == selectedPeriodId }
+    val scopeLabel = selectedPeriod?.name ?: month
+    val range: Pair<Long, Long> = if (selectedPeriod != null)
+        selectedPeriod.startMillis to selectedPeriod.endMillis
+    else remember(c) { c.monthRange() }
+
     val byType = remember(range, revision) { c.sumByType(range.first, range.second) }
     val byCategory = remember(range, revision) { c.expenseByCategory(range.first, range.second) }
     val byAccount = remember(range, revision) { c.sumByAccount(range.first, range.second) }
     val cats = remember(range) { c.categoriesById() }
     val accs = remember(range) { c.accountsById() }
 
-    // 只需一次「近30天」查询：近7天是其连续子窗口（takeLast(7) 的 MM/dd 标签一致），
-    // 避免 dailySeries(7) 再跑一次重叠的全表 GROUP BY。
-    val monthSeries = remember(range, revision) { c.dailySeries(30) }
-    val weekSeries = remember(range, revision) { monthSeries.takeLast(7) }
+    var scopeExpense = 0L
+    var scopeIncome = 0L
+    byType.forEach {
+        when (it.key) {
+            "EXPENSE" -> scopeExpense = it.total
+            "INCOME" -> scopeIncome = it.total
+        }
+    }
+    val scopeBalance = scopeIncome - scopeExpense
+
+    // 本月真实收支：预算照常按自然月算（与所选统计范围无关）。
+    val monthRange = remember(c) { c.monthRange() }
+    val monthByType = remember(monthRange, revision) { c.sumByType(monthRange.first, monthRange.second) }
+    var monthExpense = 0L
+    monthByType.forEach { if (it.key == "EXPENSE") monthExpense = it.total }
+    val budgetFen = remember(revision) { c.monthlyBudgetFen() }
+
+    // 只需一次「近30天」查询：近7天是其连续子窗口（takeLast(7) 的 MM/dd 标签一致）。
+    val monthSeries = remember(monthRange, revision) { c.dailySeries(30) }
+    val weekSeries = remember(monthRange, revision) { monthSeries.takeLast(7) }
     val hasWeek = remember(weekSeries) { weekSeries.any { it.second > 0 || it.third > 0 } }
     val hasMonth = remember(monthSeries) { monthSeries.any { it.second > 0 || it.third > 0 } }
     val balancePoints = remember(monthSeries) {
         val arr = ArrayList<Long>(monthSeries.size)
         var run = 0L
         monthSeries.forEach { run += it.third - it.second; arr.add(run) }
-        // 结余按「元」绘制，与文案「单位元」一致（分值 /100），避免 100 倍错位。
         arr.map { it / 100L }
     }
 
-    var expense = 0L
-    var income = 0L
-    byType.forEach {
-        when (it.key) {
-            "EXPENSE" -> expense = it.total
-            "INCOME" -> income = it.total
-        }
+    // 同类时段对比：选中「某时段」时，列出同类型的所有时段支出，便于寒暑假/学期分开对比。
+    val compareRows = remember(selectedPeriodId, selectedPeriod?.type, revision, periods) {
+        if (selectedPeriod == null) emptyList()
+        else periods.filter { it.type == selectedPeriod.type }
+            .map { p ->
+                val total = c.expenseBetween(p.startMillis, p.endMillis)
+                val days = ((p.endMillis - p.startMillis) / 86_400_000L).coerceAtLeast(1L)
+                PeriodCompareRow(p, total, days)
+            }
+            .sortedBy { it.period.startMillis }
     }
-    val balance = income - expense
 
     // 分类 → 配色与图例（仅占比 top7，其余并入「其他」）
     val donutSegments = remember(byCategory) {
@@ -118,14 +156,36 @@ internal fun StatsScreen(c: AppContainer) {
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item { OverviewCard(month, balance, expense, income) }
+        // 统计范围选择：本月 / 各寒假·暑假·学期时段
+        item {
+            Row(Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = selectedPeriodId == null, onClick = { selectedPeriodId = null },
+                    label = { Text("本月") })
+                periods.forEach { p ->
+                    FilterChip(selected = selectedPeriodId == p.id, onClick = { selectedPeriodId = p.id },
+                        label = { Text("${p.name} · ${periodTypeLabel(p.type)}") })
+                }
+            }
+        }
 
-        item { Section("支出分类", "$month 消费结构") }
+        item { BudgetProgressCard(month, budgetFen, monthExpense) }
+
+        item { OverviewCard(scopeLabel, scopeBalance, scopeExpense, scopeIncome) }
+
+        // 同类时段对比（仅选中具体时段时展示）
+        if (selectedPeriod != null) {
+            item { Section("同类时段对比", "与「${scopeLabel}」同类型的历史时段") }
+            item { PeriodCompareCard(compareRows, selectedPeriod.id) }
+        }
+
+        item { Section("支出分类", "$scopeLabel 消费结构") }
         if (byCategory.isEmpty()) {
-            item { EmptyState("📊", "本月暂无支出", "记几笔后这里会显示消费分类结构") }
+            item { EmptyState("📊", "$scopeLabel 暂无支出", "记几笔后这里会显示消费分类结构") }
         } else {
             item {
-                DonutCard(segments = donutSegments, centerValue = "¥${formatYuan(expense)}")
+                DonutCard(segments = donutSegments, centerValue = "¥${formatYuan(scopeExpense)}",
+                    centerLabel = "$scopeLabel 支出")
             }
             items(legendRows.size) { i ->
                 LegendRowCard(legendRows[i])
@@ -160,15 +220,91 @@ internal fun StatsScreen(c: AppContainer) {
     }
 }
 
+/** 本月预算卡：预算 / 已花 / 剩余 + 超支警示进度条。 */
 @Composable
-private fun OverviewCard(month: String, balance: Long, expense: Long, income: Long) {
+private fun BudgetProgressCard(month: String, budgetFen: Long?, spent: Long) {
+    Card(
+        Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = CardBg),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            if (budgetFen == null || budgetFen <= 0) {
+                Text("$month 预算未设置", fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(4.dp))
+                Text("到「我的 > 月度预算」设置每月花销上限，即可查看本月还剩下多少钱。",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall)
+            } else {
+                val remaining = budgetFen - spent
+                val over = remaining < 0
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("$month 预算", fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        if (over) "已超支 ¥ ${formatYuan(-remaining)}"
+                        else "剩余 ¥ ${formatYuan(remaining)}",
+                        color = if (over) MoneyRed else BrandDeep,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                LinearProgressIndicator(
+                    progress = { (spent.toFloat() / budgetFen).coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth().height(8.dp),
+                    color = if (over) MoneyRed else Brand,
+                    trackColor = Color(0xFFE0E6E6),
+                )
+                Spacer(Modifier.height(6.dp))
+                Text("已花 ¥ ${formatYuan(spent)}  / 预算 ¥ ${formatYuan(budgetFen)}",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelSmall)
+            }
+        }
+    }
+}
+
+/** 同类时段支出对比：列出同类型的每个时段与其支出、日均。 */
+@Composable
+private fun PeriodCompareCard(rows: List<PeriodCompareRow>, selectedId: String) {
+    Card(
+        Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = CardBg),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            rows.forEach { r ->
+                val isSelected = r.period.id == selectedId
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(r.period.name + if (isSelected) "（当前）" else "",
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium)
+                        Text("${formatDate(r.period.startMillis)} ~ ${formatDate(r.period.endMillis - 1)} · 共${r.days}天 · 日均¥${formatYuan(r.expense / r.days)}",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.labelSmall)
+                    }
+                    Text("¥ ${formatYuan(r.expense)}",
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isSelected) BrandDeep else MaterialTheme.colorScheme.onSurface)
+                }
+                Spacer(Modifier.height(2.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun OverviewCard(scope: String, balance: Long, expense: Long, income: Long) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = BrandDeep),
     ) {
         Column(Modifier.fillMaxWidth().padding(18.dp)) {
-            Text("$month 收支总览", color = Color(0xFFB2DFDB),
+            Text("$scope 收支总览", color = Color(0xFFB2DFDB),
                 style = MaterialTheme.typography.labelMedium)
             Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.Bottom) {
@@ -222,12 +358,12 @@ private fun ChartCard(modifier: Modifier = Modifier, content: @Composable Column
 
 /** 环形占比：中央显示支出总额。 */
 @Composable
-private fun DonutCard(segments: List<Pair<Float, Color>>, centerValue: String) {
+private fun DonutCard(segments: List<Pair<Float, Color>>, centerValue: String, centerLabel: String) {
     ChartCard {
         Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) {
             DonutChart(segments, Modifier.fillMaxSize().padding(10.dp))
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("本月支出", color = MaterialTheme.colorScheme.onSurfaceVariant,
+                Text(centerLabel, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.labelSmall)
                 Text(centerValue, fontSize = 19.sp, fontWeight = FontWeight.Bold,
                     color = MoneyRed, maxLines = 1)

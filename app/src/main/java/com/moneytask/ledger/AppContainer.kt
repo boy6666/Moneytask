@@ -25,6 +25,8 @@ import com.moneytask.ledger.db.LedgerMappers.toDomain
 import com.moneytask.ledger.db.LedgerMappers.toEntity
 import com.moneytask.ledger.db.RoomLedgerStore
 import com.moneytask.ledger.db.DayStat
+import com.moneytask.ledger.db.PeriodEntity
+import com.moneytask.ledger.db.SettingEntity
 import com.moneytask.ledger.db.SumRow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -223,6 +225,45 @@ class AppContainer(private val context: Context) {
 
     /** 当前有效账目条数（含自动与手动）。 */
     fun transactionCount(): Int = runBlocking(io) { dao.count() }
+
+    // ---- 月度预算（v3 设置表） ----
+
+    /** 月度预算的设置键，值为「分」的字符串。 */
+    companion object { const val KEY_MONTHLY_BUDGET_FEN = "monthly_budget_fen" }
+
+    /** 当前月度预算（分）；未设置返回 null。 */
+    fun monthlyBudgetFen(): Long? = runBlocking(io) {
+        dao.getSetting(KEY_MONTHLY_BUDGET_FEN)?.toLongOrNull()
+    }
+
+    /** 设置/更新月度预算（分）。传 0 视为清除。 */
+    fun setMonthlyBudgetFen(fen: Long) = runBlocking(io) {
+        if (fen <= 0) dao.putSetting(SettingEntity(KEY_MONTHLY_BUDGET_FEN, "", System.currentTimeMillis()))
+        else dao.putSetting(SettingEntity(KEY_MONTHLY_BUDGET_FEN, fen.toString(), System.currentTimeMillis()))
+    }
+
+    // ---- 时段（寒假/暑假/学期，v3） ----
+
+    /** 全部时段，按起始时间升序（供报表范围选择与「我的」页管理）。 */
+    val periodsFlow: Flow<List<PeriodEntity>> = dao.observePeriods()
+
+    /** 新增一个时段；起止必须构成有效区间。返回是否成功。 */
+    fun addPeriod(name: String, type: String, startMillis: Long, endMillis: Long): Boolean =
+        runBlocking(io) {
+            if (name.isBlank() || endMillis <= startMillis) return@runBlocking false
+            val now = System.currentTimeMillis()
+            dao.insertPeriod(
+                PeriodEntity("period_${UUID.randomUUID().toString().take(8)}", name.trim(), type, startMillis, endMillis, now)
+            )
+            true
+        }
+
+    fun deletePeriod(id: String) = runBlocking(io) { dao.deletePeriod(id) }
+
+    /** 区间内的支出合计（分），用于同类时段对比。 */
+    fun expenseBetween(start: Long, end: Long): Long = runBlocking(io) {
+        dao.sumByType(start, end).firstOrNull { it.key == "EXPENSE" }?.total ?: 0L
+    }
 
     // ---- 账户管理 ----
 

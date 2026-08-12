@@ -62,6 +62,32 @@ data class TransactionEntity(
     val deletedAt: Long? = null,
 )
 
+/**
+ * 键值设置表（v3 新增）。目前存「月度预算」等单值偏好。
+ * key 为稳定标识（如 "monthly_budget_fen"），value 为序列化值（预算分数转字符串）。
+ */
+@Entity(tableName = "app_settings")
+data class SettingEntity(
+    @PrimaryKey val key: String,
+    val value: String,
+    val updatedAt: Long,
+)
+
+/**
+ * 时间段（v3 新增）：把某段时间标记为 寒假/暑假/学期/自定义，供报表按时段分开统计与同类对比。
+ * startMillis/endMillis 为本地时区 0 点起的毫秒，endMillis 指结束日【次日 0 点】（不含），
+ * 与账目 time 的区间查询 [start, end) 语义一致。
+ */
+@Entity(tableName = "time_periods")
+data class PeriodEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val type: String,      // WINTER/SUMMER/TERM/CUSTOM
+    val startMillis: Long,
+    val endMillis: Long,
+    val createdAt: Long,
+)
+
 /** 聚合查询结果行：key 为分类/账户/方向 id，total 为金额（分）。 */
 data class SumRow(val key: String, val total: Long)
 

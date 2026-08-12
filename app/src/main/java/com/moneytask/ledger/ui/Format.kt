@@ -51,3 +51,19 @@ internal fun relativeTime(millis: Long): String {
 /** 当前自然月标签，如 "8月"。 */
 internal fun currentMonthLabel(): String =
     LocalDate.now().format(DateTimeFormatter.ofPattern("M月"))
+
+/** "yyyy-MM-dd" → 本地 0 点毫秒；解析失败返回 null。 */
+internal fun parseDateToMillis(s: String): Long? = runCatching {
+    LocalDate.parse(s.trim(), DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+        .atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+}.getOrNull()
+
+/** 毫秒 → "yyyy-MM-dd"（本地时区）。 */
+internal fun formatDate(millis: Long): String =
+    Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toLocalDate()
+        .format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+
+/** 时段类型代号 → 中文标签（寒/暑/学期/自定义）。 */
+internal fun periodTypeLabel(type: String): String = when (type) {
+    "WINTER" -> "寒假"; "SUMMER" -> "暑假"; "TERM" -> "学期"; else -> "自定义"
+}

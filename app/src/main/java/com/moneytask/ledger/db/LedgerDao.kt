@@ -79,6 +79,12 @@ interface LedgerDao {
     @Query("DELETE FROM categories")
     suspend fun deleteAllCategories()
 
+    @Query("DELETE FROM app_settings")
+    suspend fun deleteAllSettings()
+
+    @Query("DELETE FROM time_periods")
+    suspend fun deleteAllPeriods()
+
     // ---- 账户管理 ----
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -92,6 +98,29 @@ interface LedgerDao {
 
     @Query("UPDATE accounts SET isSystemDefault = 1 WHERE id = :id")
     suspend fun setAccountDefault(id: String)
+
+    // ---- 设置 / 时段（v3） ----
+
+    @Query("SELECT * FROM app_settings")
+    suspend fun settings(): List<SettingEntity>
+
+    @Query("SELECT value FROM app_settings WHERE `key` = :key")
+    suspend fun getSetting(key: String): String?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun putSetting(s: SettingEntity)
+
+    @Query("SELECT * FROM time_periods ORDER BY startMillis ASC")
+    fun observePeriods(): Flow<List<PeriodEntity>>
+
+    @Query("SELECT * FROM time_periods ORDER BY startMillis ASC")
+    suspend fun periods(): List<PeriodEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPeriod(p: PeriodEntity)
+
+    @Query("DELETE FROM time_periods WHERE id = :id")
+    suspend fun deletePeriod(id: String)
 
     // ---- 统计聚合 ----
 

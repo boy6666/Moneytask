@@ -54,7 +54,44 @@ class AppDatabaseMigrationTest {
         db.close()
     }
 
+    @Test
+    fun migrate2To3_createsSettingsAndPeriods_keepsData() {
+        // 建 v2 库并写入一行账目（用 v2 的表，含 v2 的 manuallyEdited 列）。
+        helper.createDatabase(TEST_DB2, 2).apply {
+            execSQL(
+                "INSERT INTO transactions " +
+                    "(id,amountFen,type,time,accountId,categoryId,merchant,paymentMethod,note,groupId,source,isPendingReview,manuallyEdited,createdAt,updatedAt) " +
+                    "VALUES ('t1',4210,'EXPENSE',100, NULL,NULL,'美团',NULL,NULL,NULL,'AUTO',0,1,0,0)"
+            )
+            close()
+        }
+
+        // 执行 v2→v3 迁移并校验 schema 演化到 v3。
+        val db = helper.runMigrationsAndValidate(TEST_DB2, 3, true, MIGRATION_2_3)
+
+        // 存量账目仍在。
+        db.query("SELECT manuallyEdited FROM transactions WHERE id='t1'").use { c ->
+            assertTrue("数据应保留", c.moveToFirst())
+        }
+        // 新表可用：写入并读回设置与时段。
+        db.execSQL("INSERT INTO app_settings (`key`,`value`,`updatedAt`) VALUES ('monthly_budget_fen','150000',0)")
+        db.query("SELECT value FROM app_settings WHERE `key`='monthly_budget_fen'").use { c ->
+            assertTrue("设置应可读", c.moveToFirst())
+            assertEquals("预算应为 150000 分", "150000", c.getString(0))
+        }
+        db.execSQL(
+            "INSERT INTO time_periods (id,name,type,startMillis,endMillis,createdAt) " +
+                "VALUES ('p1','2026 暑假','SUMMER',0,86400000,0)"
+        )
+        db.query("SELECT name,type FROM time_periods WHERE id='p1'").use { c ->
+            assertTrue("时段应可读", c.moveToFirst())
+            assertEquals("2026 暑假", c.getString(0))
+        }
+        db.close()
+    }
+
     private companion object {
         const val TEST_DB = "migration-test"
+        const val TEST_DB2 = "migration-test-2to3"
     }
 }

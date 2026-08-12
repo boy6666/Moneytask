@@ -27,7 +27,7 @@ object BackupManager {
     fun export(context: Context, dao: LedgerDao): File = runBlocking(Dispatchers.IO) {
         val root = JSONObject()
             .put("app", MANIFEST_APP)
-            .put("databaseVersion", 2)
+            .put("databaseVersion", 3)
             .put("exportedAt", System.currentTimeMillis())
 
         val accounts = JSONArray()
@@ -60,6 +60,22 @@ object BackupManager {
         }
         root.put("transactions", txns)
 
+        val settings = JSONArray()
+        dao.settings().forEach { s ->
+            settings.put(JSONObject()
+                .put("key", s.key).put("value", s.value).put("updatedAt", s.updatedAt))
+        }
+        root.put("settings", settings)
+
+        val periods = JSONArray()
+        dao.periods().forEach { p ->
+            periods.put(JSONObject()
+                .put("id", p.id).put("name", p.name).put("type", p.type)
+                .put("startMillis", p.startMillis).put("endMillis", p.endMillis)
+                .put("createdAt", p.createdAt))
+        }
+        root.put("periods", periods)
+
         val dir = context.getExternalFilesDir(null) ?: context.filesDir
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val file = File(dir, "moneytask_backup_$stamp.json")
@@ -82,6 +98,8 @@ object BackupManager {
         dao.deleteAllTransactions()
         dao.deleteAllAccounts()
         dao.deleteAllCategories()
+        dao.deleteAllSettings()
+        dao.deleteAllPeriods()
 
         val accounts = root.optJSONArray("accounts")
         if (accounts != null) for (i in 0 until accounts.length()) {
@@ -130,6 +148,25 @@ object BackupManager {
                 ))
             }
             dao.insertAll(list)
+        }
+
+        val settings = root.optJSONArray("settings")
+        if (settings != null) for (i in 0 until settings.length()) {
+            val o = settings.getJSONObject(i)
+            dao.putSetting(SettingEntity(
+                key = o.getString("key"), value = o.getString("value"),
+                updatedAt = o.optLong("updatedAt"),
+            ))
+        }
+
+        val periods = root.optJSONArray("periods")
+        if (periods != null) for (i in 0 until periods.length()) {
+            val o = periods.getJSONObject(i)
+            dao.insertPeriod(PeriodEntity(
+                id = o.getString("id"), name = o.getString("name"), type = o.getString("type"),
+                startMillis = o.getLong("startMillis"), endMillis = o.getLong("endMillis"),
+                createdAt = o.optLong("createdAt"),
+            ))
         }
 
         dao.count()
